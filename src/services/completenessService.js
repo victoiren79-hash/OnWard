@@ -6,10 +6,15 @@
 // Pure functions. No I/O. No LLM. No clock.
 //
 // Matching is by normalized label — case/punctuation/whitespace-insensitive,
-// with a small set of obvious plural normalizations. Anything fuzzier than
-// that is deliberately out of scope for this service; the LLM layer is
-// responsible for proposing a match upstream by inserting a requirement
-// that will normalize identically.
+// with a small set of obvious plural normalizations.
+//
+// Optional filters:
+//   onlyCommonlyMissed — return only rows where is_commonly_missed is true
+//   onlyEssentials     — return only rows where priority is 'essential'
+//   onlyHelpful        — return only rows where priority is 'helpful'
+//
+// Callers can combine filters but only one of onlyEssentials / onlyHelpful
+// makes sense at a time.
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -19,30 +24,23 @@
  * Compute which template items are missing from a goal's requirements.
  *
  * @param {object} goal
- *   Must have { goal_type } (may be null). Other fields ignored.
- *
  * @param {Array<object>} requirements
- *   Current requirements for the goal. Each must have { label, kind }.
- *   Other fields ignored.
- *
- * @param {Array<object>} templateRows
- *   Rows from GoalTypeTemplate for goal.goal_type. Each must have
- *   { label, kind, typical_turnaround_days, is_commonly_missed }.
- *   If the caller hasn't fetched them, pass [] and the service returns
- *   a `no_template` result.
- *
+ * @param {Array<object>} templateRows — rows from GoalTypeTemplate for the
+ *   goal's type. Each must have { label, kind, typical_turnaround_days,
+ *   is_commonly_missed, priority }.
  * @param {object} [opts]
  * @param {boolean} [opts.onlyCommonlyMissed=false]
- *   If true, filter the result to items where is_commonly_missed === true.
- *
+ * @param {boolean} [opts.onlyEssentials=false]
+ * @param {boolean} [opts.onlyHelpful=false]
  * @returns {{
  *   missing: Array<{
  *     label: string,
  *     kind: 'self_action' | 'external_dependency',
  *     typical_turnaround_days: number | null,
- *     is_commonly_missed: boolean
+ *     is_commonly_missed: boolean,
+ *     priority: 'essential' | 'helpful'
  *   }>,
- *   present: string[],          // labels from requirements that matched a template row
+ *   present: string[],
  *   reason: 'ok' | 'no_goal_type' | 'no_template',
  *   goal_type: string | null
  * }}
@@ -87,37 +85,31 @@ export function findMissingRequirements(
         kind: t.kind,
         typical_turnaround_days: t.typical_turnaround_days ?? null,
         is_commonly_missed: Boolean(t.is_commonly_missed),
+        priority: t.priority === 'essential' ? 'essential' : 'helpful',
       });
     }
   }
 
-  // --- Order: commonly-missed first, then external deps, then alpha ------
+  // --- Order: essential first, then commonly-missed, then external, then alpha
   missing.sort(compareMissing);
 
-  const filtered =
-    opts.onlyCommonlyMissed === true
-      ? missing.filter((m) => m.is_commonly_missed)
-      : missing;
+  let filtered = missing;
+
+  if (opts.onlyCommonlyMissed === true) {
+    filtered = filtered.filter((m) => m.is_commonly_missed);
+  }
+  if (opts.onlyEssentials === true) {
+    filtered = filtered.filter((m) => m.priority === 'essential');
+  }
+  if (opts.onlyHelpful === true) {
+    filtered = filtered.filter((m) => m.priority === 'helpful');
+  }
 
   return result(filtered, present, 'ok', goalType);
 }
 
 // ---------------------------------------------------------------------------
-// Label normalization (deterministic, small, documented)
-//
-// Steps:
-//   1. Lowercase.
-//   2. Replace any non-alphanumeric character with a space.
-//   3. Collapse runs of whitespace to a single space; trim.
-//   4. Drop a small set of trailing plural markers when the remainder is
-//      at least 3 chars. This catches "letter(s)" / "letters" / "letter",
-//      "scores" / "score", etc. It is deliberately conservative — it will
-//      not merge genuinely distinct labels.
-//   5. Strip a small set of leading articles ("a", "the") — rare, but cheap.
-//
-// The whole point is that this stays small and readable. If it grows
-// beyond what you can eyeball in 15 seconds, it's a signal that fuzzy
-// matching belongs in the LLM layer, not here.
+// Label normalization
 // ---------------------------------------------------------------------------
 
 export function normalizeLabel(label) {
@@ -137,10 +129,14 @@ export function normalizeLabel(label) {
   s = s.replace(/^(a|an|the)\s+/, '');
 
   // Plural normalization: drop a trailing 's' if the word is long enough.
-  // Apply per-word so "test scores sent" -> "test score sent".
+  // Skip a small exception list where the trailing s is part of the word.
+  const KEEP_S = new Set(['status', 'process', 'access', 'address', 'business', 'witness']);
   s = s
     .split(' ')
-    .map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w))
+    .map((w) => {
+      if (KEEP_S.has(w)) return w;
+      return w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+    })
     .join(' ');
 
   return s;
@@ -151,11 +147,16 @@ export function normalizeLabel(label) {
 // ---------------------------------------------------------------------------
 
 function compareMissing(a, b) {
-  // commonly-missed first
+  // essential first
+  const ap = a.priority === 'essential' ? 0 : 1;
+  const bp = b.priority === 'essential' ? 0 : 1;
+  if (ap !== bp) return ap - bp;
+
+  // then commonly-missed
   if (a.is_commonly_missed !== b.is_commonly_missed) {
     return a.is_commonly_missed ? -1 : 1;
   }
-  // external deps next (they carry real turnaround risk)
+  // then external deps
   if (a.kind !== b.kind) {
     return a.kind === 'external_dependency' ? -1 : 1;
   }

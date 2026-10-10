@@ -1,175 +1,249 @@
-// Onward — tests for CompletenessService.
-// Run with:  node --test src/services/completenessService.test.js
+// Onward — tests for RequirementService.
+// Run with:  node --test src/services/requirementService.test.js
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { findMissingRequirements, normalizeLabel } from './completenessService.js';
+import {
+  STATUSES,
+  KINDS,
+  canTransition,
+  allowedNextStates,
+  applyTransition,
+} from './requirementService.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const GRAD_TEMPLATE = [
-  { label: 'Recommendation letter(s)',           kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: false },
-  { label: 'Official transcripts',               kind: 'external_dependency', typical_turnaround_days: 10, is_commonly_missed: false },
-  { label: 'Test scores (GRE/TOEFL/IELTS) sent to institution', kind: 'external_dependency', typical_turnaround_days: 7, is_commonly_missed: true },
-  { label: 'Statement of purpose / personal statement', kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: false },
-  { label: 'CV / resume',                        kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: false },
-  { label: 'Financial documents / proof of funds', kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: true },
-  { label: 'Application fee paid',               kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: true },
-];
+function makeSelf(overrides = {}) {
+  return {
+    id: 'r-self-1',
+    kind: 'self_action',
+    status: 'not_started',
+    label: 'Write statement of purpose',
+    requested_at: null,
+    received_at: null,
+    notes: null,
+    ...overrides,
+  };
+}
 
-const GRAD_GOAL = { goal_type: 'grad_scholarship_application' };
+function makeExternal(overrides = {}) {
+  return {
+    id: 'r-ext-1',
+    kind: 'external_dependency',
+    status: 'not_started',
+    label: 'Recommendation letter',
+    requested_at: null,
+    received_at: null,
+    notes: null,
+    ...overrides,
+  };
+}
 
-// ---------------------------------------------------------------------------
-// normalizeLabel
-// ---------------------------------------------------------------------------
-
-test('normalizeLabel: lowercase + punctuation + whitespace', () => {
-  assert.equal(normalizeLabel('Recommendation letter(s)'), 'recommendation letter');
-  assert.equal(normalizeLabel('  CV / resume  '), 'cv resume');
-});
-
-test('normalizeLabel: plural normalization', () => {
-  assert.equal(normalizeLabel('Official transcripts'), 'official transcript');
-  assert.equal(normalizeLabel('Test scores sent'), 'test score sent');
-});
-
-test('normalizeLabel: does not strip "ss"', () => {
-  assert.equal(normalizeLabel('address'), 'address');
-});
-
-test('normalizeLabel: drops leading articles', () => {
-  assert.equal(normalizeLabel('The transcript'), 'transcript');
-  assert.equal(normalizeLabel('a letter'), 'letter');
-});
-
-test('normalizeLabel: empty / non-string is safe', () => {
-  assert.equal(normalizeLabel(''), '');
-  assert.equal(normalizeLabel(null), '');
-  assert.equal(normalizeLabel(42), '');
-});
+const T0 = new Date('2026-03-01T12:00:00Z');
+const T1 = new Date('2026-03-03T12:00:00Z');
+const T2 = new Date('2026-03-10T12:00:00Z');
 
 // ---------------------------------------------------------------------------
-// findMissingRequirements — happy paths
+// canTransition — matrix
 // ---------------------------------------------------------------------------
 
-test('returns all template items when no requirements exist', () => {
-  const out = findMissingRequirements(GRAD_GOAL, [], GRAD_TEMPLATE);
-  assert.equal(out.reason, 'ok');
-  assert.equal(out.missing.length, GRAD_TEMPLATE.length);
-  assert.deepEqual(out.present, []);
+test('canTransition: self_action cannot enter waiting_on_other', () => {
+  assert.equal(canTransition('self_action', 'not_started', 'waiting_on_other'), false);
+  assert.equal(canTransition('self_action', 'in_progress', 'waiting_on_other'), false);
 });
 
-test('excludes items the user already has when labels match after normalization', () => {
-  const reqs = [
-    { label: 'Official Transcripts', kind: 'external_dependency' },
-    { label: 'CV / resume', kind: 'self_action' },
-  ];
-  const out = findMissingRequirements(GRAD_GOAL, reqs, GRAD_TEMPLATE);
-  assert.ok(out.present.includes('Official transcripts'));
-  assert.ok(out.present.includes('CV / resume'));
-  assert.ok(!out.missing.some((m) => m.label === 'Official transcripts'));
-  assert.ok(!out.missing.some((m) => m.label === 'CV / resume'));
+test('canTransition: external_dependency cannot skip waiting_on_other to done', () => {
+  assert.equal(canTransition('external_dependency', 'not_started', 'done'), false);
+  assert.equal(canTransition('external_dependency', 'in_progress', 'done'), false);
 });
 
-test('does NOT fuzzy-match synonyms — that is the LLM layer\'s job', () => {
-  // "rec letter" is what a real user says. It normalizes to "rec letter",
-  // which does not equal "recommendation letter". So the template item
-  // still shows as missing. This is intentional: fuzzy matching happens
-  // in the LLM extraction step, which canonicalizes user phrasing to the
-  // template label before creating the Requirement. See the design note
-  // in completenessService.js.
-  const reqs = [{ label: 'rec letter', kind: 'external_dependency' }];
-  const out = findMissingRequirements(GRAD_GOAL, reqs, GRAD_TEMPLATE);
-  assert.ok(!out.present.includes('Recommendation letter(s)'));
-  assert.ok(out.missing.some((m) => m.label === 'Recommendation letter(s)'));
+test('canTransition: external_dependency must go through waiting_on_other', () => {
+  assert.equal(canTransition('external_dependency', 'not_started', 'waiting_on_other'), true);
+  assert.equal(canTransition('external_dependency', 'in_progress', 'waiting_on_other'), true);
+  assert.equal(canTransition('external_dependency', 'waiting_on_other', 'done'), true);
 });
 
-test('matches exact label after normalization', () => {
-  const reqs = [
-    { label: 'Official Transcripts', kind: 'external_dependency' },
-  ];
-  const out = findMissingRequirements(GRAD_GOAL, reqs, GRAD_TEMPLATE);
-  assert.ok(out.present.includes('Official transcripts'));
-  assert.ok(!out.missing.some((m) => m.label === 'Official transcripts'));
+test('canTransition: rejects unknown kinds and statuses', () => {
+  assert.equal(canTransition('bogus', 'not_started', 'in_progress'), false);
+  assert.equal(canTransition('self_action', 'bogus', 'in_progress'), false);
+  assert.equal(canTransition('self_action', 'not_started', 'bogus'), false);
+});
+
+test('allowedNextStates: self_action from not_started is [in_progress, done]', () => {
+  const next = allowedNextStates('self_action', 'not_started');
+  assert.deepEqual(next.sort(), ['done', 'in_progress']);
+});
+
+test('allowedNextStates: external_dependency from not_started is [waiting_on_other]', () => {
+  assert.deepEqual(allowedNextStates('external_dependency', 'not_started'), [
+    'waiting_on_other',
+  ]);
 });
 
 // ---------------------------------------------------------------------------
-// findMissingRequirements — ordering
+// applyTransition — happy paths
 // ---------------------------------------------------------------------------
 
-test('orders commonly-missed first, then external deps, then alpha', () => {
-  const out = findMissingRequirements(GRAD_GOAL, [], GRAD_TEMPLATE);
-  const labels = out.missing.map((m) => m.label);
-  // All commonly-missed come before any non-commonly-missed:
-  const firstNonMissed = out.missing.findIndex((m) => !m.is_commonly_missed);
-  const lastMissed = out.missing.map((m) => m.is_commonly_missed).lastIndexOf(true);
-  assert.ok(lastMissed < firstNonMissed);
-  // Sanity: labels array exists
-  assert.ok(labels.length > 0);
+test('applyTransition: self_action not_started -> in_progress', () => {
+  const result = applyTransition(makeSelf(), 'in_progress', { at: T0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'in_progress');
+  assert.equal(result.next.requested_at, null);
+  assert.equal(result.next.received_at, null);
 });
 
-// ---------------------------------------------------------------------------
-// findMissingRequirements — filtering
-// ---------------------------------------------------------------------------
+test('applyTransition: self_action not_started -> done sets received_at = at', () => {
+  const result = applyTransition(makeSelf(), 'done', { at: T1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'done');
+  assert.equal(result.next.received_at?.getTime(), T1.getTime());
+});
 
-test('onlyCommonlyMissed=true filters the result', () => {
-  const out = findMissingRequirements(GRAD_GOAL, [], GRAD_TEMPLATE, {
-    onlyCommonlyMissed: true,
+test('applyTransition: external not_started -> waiting_on_other sets requested_at', () => {
+  const result = applyTransition(makeExternal(), 'waiting_on_other', { at: T0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'waiting_on_other');
+  assert.equal(result.next.requested_at?.getTime(), T0.getTime());
+  assert.equal(result.next.received_at, null);
+});
+
+test('applyTransition: external waiting_on_other -> done sets received_at', () => {
+  const waiting = makeExternal({
+    status: 'waiting_on_other',
+    requested_at: T0,
   });
-  assert.ok(out.missing.length > 0);
-  assert.ok(out.missing.every((m) => m.is_commonly_missed));
-  // And it's a strict subset of the unfiltered result
-  const all = findMissingRequirements(GRAD_GOAL, [], GRAD_TEMPLATE);
-  assert.ok(out.missing.length < all.missing.length);
+  const result = applyTransition(waiting, 'done', { at: T2 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'done');
+  assert.equal(result.next.received_at?.getTime(), T2.getTime());
+  assert.equal(result.next.requested_at?.getTime(), T0.getTime());
+});
+
+test('applyTransition: external waiting_on_other -> in_progress clears the wait', () => {
+  const waiting = makeExternal({
+    status: 'waiting_on_other',
+    requested_at: T0,
+  });
+  const result = applyTransition(waiting, 'in_progress', { at: T1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'in_progress');
+  assert.equal(result.next.requested_at?.getTime(), T0.getTime());
+  assert.equal(result.next.received_at, null);
+});
+
+test('applyTransition: reopening a done item clears received_at', () => {
+  const done = makeExternal({
+    status: 'done',
+    requested_at: T0,
+    received_at: T2,
+  });
+  const result = applyTransition(done, 'waiting_on_other', { at: T2 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'waiting_on_other');
+  assert.equal(result.next.received_at, null);
 });
 
 // ---------------------------------------------------------------------------
-// findMissingRequirements — fallbacks
+// applyTransition — illegal transitions now return, not throw
 // ---------------------------------------------------------------------------
 
-test('no goal_type → reason "no_goal_type" and empty missing', () => {
-  const out = findMissingRequirements({ goal_type: null }, [], GRAD_TEMPLATE);
-  assert.equal(out.reason, 'no_goal_type');
-  assert.equal(out.goal_type, null);
-  assert.deepEqual(out.missing, []);
+test('applyTransition: waiting_on_other -> done for self_action returns failure', () => {
+  const self = makeSelf({ status: 'in_progress' });
+  const result = applyTransition(self, 'waiting_on_other', { at: T0 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /illegal transition/);
+  assert.equal(result.currentStatus, 'in_progress');
 });
 
-test('no template rows → reason "no_template" and empty missing', () => {
-  const out = findMissingRequirements(GRAD_GOAL, [], []);
-  assert.equal(out.reason, 'no_template');
-  assert.equal(out.goal_type, 'grad_scholarship_application');
-  assert.deepEqual(out.missing, []);
+test('applyTransition: external not_started -> done returns failure with nearest', () => {
+  const ext = makeExternal();
+  const result = applyTransition(ext, 'done', { at: T0 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /illegal transition/);
+  // Nearest legal for external not_started is waiting_on_other.
+  assert.equal(result.nearestLegal, 'waiting_on_other');
 });
 
-test('missing goal object is handled', () => {
-  const out = findMissingRequirements(undefined, [], GRAD_TEMPLATE);
-  assert.equal(out.reason, 'no_goal_type');
+test('applyTransition: no-op returns failure', () => {
+  const ext = makeExternal({ status: 'waiting_on_other', requested_at: T0 });
+  const result = applyTransition(ext, 'waiting_on_other', { at: T1 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no-op/);
+});
+
+test('applyTransition: unknown target status returns failure', () => {
+  const result = applyTransition(makeSelf(), 'banana', { at: T0 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /unknown target status/);
+});
+
+test('applyTransition: unknown current status returns failure', () => {
+  const bogus = { ...makeSelf(), status: 'banana' };
+  const result = applyTransition(bogus, 'in_progress', { at: T0 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /unknown current status/);
+});
+
+test('applyTransition: unknown kind returns failure', () => {
+  const bogus = { ...makeSelf(), kind: 'banana' };
+  const result = applyTransition(bogus, 'in_progress', { at: T0 });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /unknown kind/);
+});
+
+test('applyTransition: missing requirement returns failure', () => {
+  const result = applyTransition(null, 'in_progress');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /requirement is required/);
+});
+
+test('applyTransition: missing id returns failure', () => {
+  const noId = { kind: 'self_action', status: 'not_started' };
+  const result = applyTransition(noId, 'in_progress');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /requirement\.id is required/);
+});
+
+test('applyTransition: received_at on self_action -> done returns failure', () => {
+  const result = applyTransition(makeSelf(), 'done', {
+    at: T0,
+    receivedAt: T1,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /received_at is not applicable to self_action/);
 });
 
 // ---------------------------------------------------------------------------
-// findMissingRequirements — purity
+// applyTransition — purity
 // ---------------------------------------------------------------------------
 
-test('does not mutate inputs', () => {
-  const reqs = [{ label: 'CV', kind: 'self_action' }];
-  const reqsSnapshot = JSON.stringify(reqs);
-  const tplSnapshot = JSON.stringify(GRAD_TEMPLATE);
-  findMissingRequirements(GRAD_GOAL, reqs, GRAD_TEMPLATE);
-  assert.equal(JSON.stringify(reqs), reqsSnapshot);
-  assert.equal(JSON.stringify(GRAD_TEMPLATE), tplSnapshot);
+test('applyTransition: does not mutate the input requirement', () => {
+  const input = makeExternal();
+  const snapshot = JSON.stringify(input);
+  applyTransition(input, 'waiting_on_other', { at: T0 });
+  assert.equal(JSON.stringify(input), snapshot);
 });
 
-test('tolerates malformed template rows without throwing', () => {
-  const bad = [
-    null,
-    { label: 42 },
-    { label: 'Valid', kind: 'self_action' },
-    undefined,
-  ];
-  const out = findMissingRequirements(GRAD_GOAL, [], bad);
-  assert.equal(out.missing.length, 1);
-  assert.equal(out.missing[0].label, 'Valid');
+test('applyTransition: returned dates are independent copies', () => {
+  const r1 = applyTransition(makeExternal(), 'waiting_on_other', { at: T0 });
+  assert.equal(r1.ok, true);
+  r1.next.requested_at.setFullYear(1999);
+
+  const r2 = applyTransition(makeExternal(), 'waiting_on_other', { at: T0 });
+  assert.equal(r2.ok, true);
+  assert.equal(r2.next.requested_at.getFullYear(), 2026);
+});
+
+// ---------------------------------------------------------------------------
+// Metadata sanity
+// ---------------------------------------------------------------------------
+
+test('STATUSES and KINDS are frozen and complete', () => {
+  assert.ok(Object.isFrozen(STATUSES));
+  assert.deepEqual(STATUSES, ['not_started', 'in_progress', 'waiting_on_other', 'done']);
+  assert.ok(Object.isFrozen(KINDS));
+  assert.deepEqual(KINDS, ['self_action', 'external_dependency']);
 });

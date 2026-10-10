@@ -129,12 +129,6 @@ export async function createRequirement({
 /**
  * Batch version of createRequirement. Inserts all rows in one round trip.
  * Returns the inserted rows in the same order as the input array.
- *
- * @param {string} goalId
- * @param {Array<{label: string, kind: string, status?: string,
- *   dependsOn?: string|null, typicalTurnaroundDays?: number|null,
- *   requestedAt?: string|null, receivedAt?: string|null, notes?: string|null}>} items
- * @returns {Promise<Array<object>>}
  */
 export async function createRequirementsBatch(goalId, items) {
   if (!Array.isArray(items) || items.length === 0) return [];
@@ -159,9 +153,6 @@ export async function createRequirementsBatch(goalId, items) {
     'createRequirementsBatch'
   );
 
-  // Postgres returns rows in insertion order for a plain insert with
-  // .select(), but we sort defensively by created_at to be safe when
-  // multiple rows share the same timestamp.
   return sortByCreatedAtThenInputOrder(data, rows, items);
 }
 
@@ -233,11 +224,6 @@ export async function appendEvent({
 
 /**
  * Batch version of appendEvent. Inserts all rows in one round trip.
- * Returns the inserted rows.
- *
- * @param {Array<{goalId: string, requirementId?: string|null,
- *   rawText?: string|null, interpretedChange?: object}>} events
- * @returns {Promise<Array<object>>}
  */
 export async function appendEventsBatch(events) {
   if (!Array.isArray(events) || events.length === 0) return [];
@@ -376,11 +362,20 @@ export async function listRiskAssessmentsForGoal(goalId, { limit = 50 } = {}) {
 
 // ---------------------------------------------------------------------------
 // Session (single-row table for state that must survive process restarts)
+//
+// The session is read on every conversational turn and written on most.
+// We cache it in module memory so the DB is touched once per process
+// instead of once per turn. saveSession writes through to both the DB
+// and the cache.
 // ---------------------------------------------------------------------------
 
 const SESSION_ID = 'default';
 
+let sessionCache = null;
+
 export async function getSession() {
+  if (sessionCache) return sessionCache;
+
   const row = unwrap(
     await supabase
       .from('Session')
@@ -390,10 +385,13 @@ export async function getSession() {
     'getSession'
   );
 
-  if (row) return row;
+  if (row) {
+    sessionCache = row;
+    return row;
+  }
 
   // Lazily create the single row on first use.
-  return unwrap(
+  const created = unwrap(
     await supabase
       .from('Session')
       .insert({
@@ -406,6 +404,8 @@ export async function getSession() {
       .single(),
     'getSession:create'
   );
+  sessionCache = created;
+  return created;
 }
 
 export async function saveSession({
@@ -413,7 +413,7 @@ export async function saveSession({
   pendingFlag = null,
   activeGoalId = null,
 } = {}) {
-  return unwrap(
+  const updated = unwrap(
     await supabase
       .from('Session')
       .upsert(
@@ -430,6 +430,8 @@ export async function saveSession({
       .single(),
     'saveSession'
   );
+  sessionCache = updated;
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -439,14 +441,11 @@ export async function saveSession({
 /**
  * Sort a batch-inserted set of rows to match the input order. Postgres
  * usually returns rows in insertion order when using .select() after an
- * insert, but this is not guaranteed if the timestamp collides. We sort
- * by created_at first (stable for near-identical timestamps), then fall
- * back to preserving the input order by matching on the label.
+ * insert, but this is not guaranteed if the timestamp collides.
  */
 function sortByCreatedAtThenInputOrder(rows, rawRows, inputItems) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
-  // Build a preferred order index from the input by label + kind.
   const orderKey = (label, kind) => `${label}::${kind}`;
   const preferred = new Map();
   inputItems.forEach((it, idx) => {

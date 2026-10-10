@@ -192,8 +192,6 @@
 
   .empty { color: var(--text-dim); padding: 20px; text-align: center; font-size: 13px; }
 
-  /* Sidebar loading skeleton — shown while list_goals / get_goal are in
-     flight, both on initial page load and on manual refresh. */
   .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; }
   .skeleton-card {
     background: var(--bg-3);
@@ -400,12 +398,6 @@ function updateClockLabel(result) {
 // Sidebar loading skeleton
 // ---------------------------------------------------------------------------
 
-/**
- * Replace the sidebar contents with the loading skeleton. Called before
- * list_goals is issued on initial page load and on manual refresh.
- * Note: on refresh we deliberately keep the current sidebar visible during
- * the fetch, and only replace with skeleton if the sidebar is empty.
- */
 function showSidebarSkeleton() {
   $goals.innerHTML = `
     <div class="skeleton-wrap" id="goals-skeleton">
@@ -445,7 +437,15 @@ $composer.addEventListener('submit', async (e) => {
     const response = await mcpCall('report_statement', { text });
     const message = response?.message ?? '(no message)';
     resolvePending(pending, 'sys', message, `intent: ${response?.intent ?? '?'}`);
-    await refreshSidebar();
+
+    // Optimistic sidebar update: if the response concerns exactly one
+    // goal, refresh only that card. Otherwise, do a full refresh.
+    const touchedGoalId = pickTouchedGoalId(response);
+    if (touchedGoalId) {
+      await refreshOneGoal(touchedGoalId);
+    } else {
+      await refreshSidebar();
+    }
   } catch (err) {
     const isAbort = err.name === 'AbortError';
     resolvePending(pending, 'error',
@@ -504,10 +504,65 @@ async function refreshSidebar({ showSkeleton = false } = {}) {
   }
 }
 
+/**
+ * Refresh a single goal's card in place. If the goal no longer exists,
+ * refresh the whole sidebar.
+ */
+async function refreshOneGoal(goalId) {
+  const existing = $goals.querySelector(
+    `.goal[data-goal-id="${cssEscape(goalId)}"]`
+  );
+
+  let detail;
+  try {
+    detail = await mcpCall('get_goal', { goal_id: goalId, event_limit: 5 });
+  } catch (e) {
+    await refreshSidebar();
+    return;
+  }
+
+  if (!detail || !detail.goal) {
+    await refreshSidebar();
+    return;
+  }
+
+  const newCard = renderGoalCard(detail);
+
+  if (existing) {
+    existing.replaceWith(newCard);
+  } else {
+    // New goal — remove the empty-state placeholder if present, then
+    // append.
+    const empty = $goals.querySelector('.empty');
+    if (empty) empty.remove();
+    $goals.appendChild(newCard);
+  }
+}
+
+/**
+ * Inspect a report_statement response and return a single goal id if the
+ * response concerns exactly one goal. Returns null otherwise.
+ */
+function pickTouchedGoalId(response) {
+  const d = response?.data;
+  if (!d || typeof d !== 'object') return null;
+
+  if (d.goal?.id) return d.goal.id;
+  if (d.goal_id) return d.goal_id;
+  if (d.requirement?.goal_id) return d.requirement.goal_id;
+
+  return null;
+}
+
+function cssEscape(s) {
+  return String(s).replace(/["\\]/g, '\\$&');
+}
+
 function renderGoalCard(detail) {
   const { goal, requirements } = detail;
   const card = document.createElement('div');
   card.className = 'goal';
+  card.dataset.goalId = goal.id;
 
   const h2 = document.createElement('h2');
   h2.textContent = goal.title;
@@ -630,12 +685,6 @@ if ($resetBtn) {
 
 // ---------------------------------------------------------------------------
 // Initial load
-//
-// On first load we explicitly show the skeleton before calling list_goals,
-// so the sidebar doesn't sit empty while the fetch is in flight. On later
-// refresh calls (triggered by the send handler, day advance, reset), we
-// keep the current contents visible instead of flickering to a skeleton —
-// the Refresh button already shows a "…" while it works.
 // ---------------------------------------------------------------------------
 
 showSidebarSkeleton();

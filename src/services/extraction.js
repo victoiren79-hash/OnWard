@@ -30,6 +30,100 @@ export const KNOWN_GOAL_TYPES = Object.freeze([
 export const REQUIREMENT_STATUSES = Object.freeze(['not_started', 'done']);
 
 // ---------------------------------------------------------------------------
+// Deterministic goal-type detection.
+//
+// The LLM is unreliable about setting goal_type. When it returns null but
+// the message clearly contains a signal, we set the type ourselves. This
+// runs AFTER the LLM has produced a draft, and only fills in a null. It
+// never overrides a type the LLM set.
+// ---------------------------------------------------------------------------
+
+const GOAL_TYPE_SIGNALS = [
+  {
+    type: 'grad_scholarship_application',
+    patterns: [
+      /\bgrad\s+school\b/i,
+      /\bgrad\s+application\b/i,
+      /\bgrad\s+program\b/i,
+      /\buniversity\b/i,
+      /\bcollege\b/i,
+      /\bmaster'?s\b/i,
+      /\bph\.?d\b/i,
+      /\bdoctoral\b/i,
+      /\bscholarship\b/i,
+      /\bfellowship\b/i,
+      /\badmission(s)?\b/i,
+      /\bapply\s+to\s+(a\s+)?(school|university|college|program)\b/i,
+      /\b(MIT|Stanford|Harvard|Oxford|Cambridge|Yale|Princeton|Columbia|Berkeley|Caltech)\b/i,
+    ],
+  },
+  {
+    type: 'visa_permit_application',
+    patterns: [
+      /\bvisa\b/i,
+      /\bresidence\s+permit\b/i,
+      /\bwork\s+permit\b/i,
+      /\btravel\s+document\b/i,
+      /\bimmigration\b/i,
+      /\bembassy\b/i,
+      /\bconsulate\b/i,
+    ],
+  },
+  {
+    type: 'job_application_with_references',
+    patterns: [
+      /\bjob\s+application\b/i,
+      /\bapply\s+for\s+(a\s+)?(job|position|role|internship)\b/i,
+      /\binternship\b/i,
+      /\bhiring\b/i,
+      /\binterview\b/i,
+    ],
+  },
+  {
+    type: 'grant_application',
+    patterns: [
+      /\bgrant\b/i,
+      /\bfunding\s+application\b/i,
+      /\bRFP\b/i,
+      /\brequest\s+for\s+proposals?\b/i,
+      /\bproposal\s+to\b/i,
+    ],
+  },
+  {
+    type: 'signed_form_return',
+    patterns: [
+      /\bsigned\s+form\b/i,
+      /\bget\s+(it|the\s+form|a\s+form)\s+signed\b/i,
+      /\bcountersign/i,
+      /\breturn\s+the\s+form\b/i,
+      /\bsignature\s+from\b/i,
+    ],
+  },
+];
+
+/**
+ * Look at a user message and return the strongest matching goal_type, or
+ * null if none match. Deterministic. Used as a fallback when the LLM
+ * returns goal_type: null but the message clearly has a signal.
+ */
+export function detectGoalType(text) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+
+  const hits = [];
+  for (const entry of GOAL_TYPE_SIGNALS) {
+    let score = 0;
+    for (const re of entry.patterns) {
+      if (re.test(text)) score += 1;
+    }
+    if (score > 0) hits.push({ type: entry.type, score });
+  }
+
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => b.score - a.score);
+  return hits[0].type;
+}
+
+// ---------------------------------------------------------------------------
 // System prompt — goal extraction
 // ---------------------------------------------------------------------------
 
@@ -41,7 +135,7 @@ Return a JSON object with this exact shape:
   "is_goal": boolean,
   "title": string,                        // short human title, e.g. "Grad application to MIT"
   "deadline": string,                     // "YYYY-MM-DD", or null if no date is mentioned
-  "goal_type": string | null,             // one of the KNOWN GOAL TYPES below, or null if unsure
+  "goal_type": string | null,             // one of the KNOWN GOAL TYPES below
   "requirements": [
     {
       "label": string,                    // short noun phrase, e.g. "Recommendation letter"
@@ -51,7 +145,7 @@ Return a JSON object with this exact shape:
   ]
 }
 
-KNOWN GOAL TYPES (use the exact string, or null if the message doesn't clearly fit one):
+KNOWN GOAL TYPES (use the exact string):
 - grad_scholarship_application    — university / grad school / scholarship applications
 - visa_permit_application         — visas, residence permits, work permits, travel permits
 - job_application_with_references — applying for a job, an internship, a position at a company
@@ -78,11 +172,40 @@ RULES:
 6. The "label" should be a short noun phrase the user would recognize, not a
    full sentence. E.g. "Recommendation letter", not "I need to get a rec letter".
    Prefer the phrasing the user used, not a generic version.
-7. Goal type matching: read the whole message. Only set a goal_type when the
-   message clearly fits one of the five types. "Applying for a job" alone is
-   job_application_with_references. "Applying to a university / grad program /
-   scholarship" is grad_scholarship_application. If the type is genuinely
-   ambiguous, set it to null.
+
+7. GOAL TYPE MATCHING. This rule is critical. Set the goal_type whenever
+   ANY of the signals below appear in the message. Do NOT wait for the
+   message to be unambiguous. Do NOT default to null when a signal is
+   present.
+
+     grad_scholarship_application signals:
+       "grad school", "grad application", "grad program", "university",
+       "college", "master's", "PhD", "doctoral", "scholarship",
+       "fellowship", "admission", "admissions", "apply to" followed by
+       a school, university, college, or program, or any named
+       university or program (MIT, Stanford, Harvard, Oxford,
+       Cambridge, Yale, Princeton, Columbia, Berkeley, Caltech)
+
+     visa_permit_application signals:
+       "visa", "permit", "residence permit", "work permit",
+       "travel document", "immigration", "embassy", "consulate"
+
+     job_application_with_references signals:
+       "job application", "position", "role", "internship", "hiring",
+       "interview", "apply for a job", "apply for a position"
+
+     grant_application signals:
+       "grant", "funding application", "RFP", "request for proposals",
+       "proposal to", "grant application"
+
+     signed_form_return signals:
+       "signed form", "signature", "get it signed", "countersign",
+       "return the form"
+
+   If TWO OR MORE signals appear, pick the one whose signal is most
+   specific to the primary goal the user is describing. If NO signal
+   appears, set goal_type to null.
+
 8. Output ONLY the JSON object. No prose, no code fences, no explanation.
 
 Examples:
@@ -102,6 +225,12 @@ Examples:
     "requirements": [
       { "label": "Permission slip", "kind": "external_dependency", "status": "not_started" }
     ] }
+
+- "I need to submit my grad school application to MIT by November 5" →
+  { "is_goal": true, "title": "Grad school application to MIT",
+    "deadline": "<resolved>",
+    "goal_type": "grad_scholarship_application",
+    "requirements": [] }
 
 - "what's the weather like" → { "is_goal": false }
 `.trim();
@@ -131,7 +260,13 @@ RULES:
 1. Extract every item the user names. "I also need a passport copy,
    application form and transcripts" is THREE items.
 2. "label" is a short noun phrase, e.g. "Passport copy", not a full
-   sentence. Prefer the phrasing the user used.
+   sentence. Prefer the phrasing the user used, with one exception:
+   if the user's phrasing clearly refers to an item that appears in
+   a known goal type template (e.g. "rec letter" -> "Recommendation
+   letter(s)", "transcripts" -> "Official transcripts"), use the
+   template phrasing as the label. This lets the completeness check
+   recognize the item. Do not stretch — only canonicalize when the
+   correspondence is unambiguous.
 3. "kind" is "external_dependency" ONLY if another person or institution
    must produce, sign, or return the item. Otherwise "self_action". If
    unsure, use "self_action".
@@ -200,7 +335,20 @@ export async function extractGoal(text, opts = {}) {
 
   if (raw.is_goal === false) return null;
 
-  return validateGoalDraft(raw);
+  const draft = validateGoalDraft(raw);
+
+  // Deterministic goal_type backfill. If the LLM returned null but the
+  // message clearly contains a signal, set the type here. Runs AFTER
+  // validation so the LLM never gets to invent a bad type, and it never
+  // overrides a type the LLM did set.
+  if (!draft.goal_type) {
+    const detected = detectGoalType(text);
+    if (detected) {
+      draft.goal_type = detected;
+    }
+  }
+
+  return draft;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,10 +358,6 @@ export async function extractGoal(text, opts = {}) {
 /**
  * Extract item names from a message that says the user needs them, to be
  * added to an existing goal.
- *
- * @param {string} text
- * @returns {Promise<{items: Array<{label: string, kind: string, status: string}>, goal_hint: string|null} | null>}
- *   Returns null if there are no items to extract.
  */
 export async function extractItems(text) {
   if (typeof text !== 'string' || !text.trim()) return null;
@@ -321,19 +465,9 @@ function validationError(what, got) {
 }
 
 // ---------------------------------------------------------------------------
-// Internals
+// Deadline reply resolver
 // ---------------------------------------------------------------------------
-/**
- * Parse a user's reply to "What's the deadline?" — a message that should
- * contain a date, and may also mention additional requirements for the
- * pending goal.
- *
- * @param {string} text
- * @param {{title: string, goal_type: string|null}} partialGoal
- * @param {object} [opts]
- * @param {Date}   [opts.today]
- * @returns {Promise<{deadline: string, additionalRequirements: Array} | null>}
- */
+
 export async function resolveDeadlineReply(text, partialGoal, opts = {}) {
   if (typeof text !== 'string' || !text.trim()) return null;
 
@@ -395,6 +529,11 @@ Return ONLY the JSON object.
 
   return { deadline, additionalRequirements };
 }
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
 function toIsoDate(d) {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
