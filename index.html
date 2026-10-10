@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onward</title>
+<style>
+  :root {
+    --bg:        #0f1115;
+    --bg-2:      #161923;
+    --bg-3:      #1d212c;
+    --border:    #2a2f3c;
+    --text:      #e7ebf3;
+    --text-dim:  #9aa3b2;
+    --accent:    #5b8cff;
+    --ok:        #4ec9a4;
+    --tight:     #e0c46c;
+    --at-risk:   #e0996c;
+    --critical:  #e06c6c;
+    --user-bg:   #243047;
+    --sys-bg:    #1a1e29;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #app { display: flex; height: 100vh; }
+
+  #chat {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid var(--border);
+  }
+  #messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 720px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user    { align-self: flex-end; background: var(--user-bg); }
+  .msg.sys     { align-self: flex-start; background: var(--sys-bg); border: 1px solid var(--border); }
+  .msg.error   { align-self: flex-start; background: #3a1f1f; border: 1px solid #5a2a2a; }
+  .msg.thinking {
+    align-self: flex-start;
+    background: var(--sys-bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-style: italic;
+    min-width: 60px;
+  }
+  .msg.thinking::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50%      { opacity: 1; }
+  }
+  .msg .meta { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+  #composer {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+  #input {
+    flex: 1 1 auto;
+    background: var(--bg-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: inherit;
+    resize: none;
+    min-height: 40px;
+    max-height: 140px;
+  }
+  #send {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 18px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #sidebar {
+    width: 420px;
+    flex: 0 0 420px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  #sidebar header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #sidebar header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #refresh {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 72px;
+  }
+  #refresh:disabled { opacity: 0.6; cursor: wait; }
+  #goals { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
+  .goal {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .goal h2 { font-size: 14px; margin: 0 0 4px 0; font-weight: 600; }
+  .goal .meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+
+  .items { list-style: none; padding: 0; margin: 8px 0 0 0; }
+  .items li {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  .items li .icon { flex: 0 0 16px; }
+  .items li .body { flex: 1 1 auto; }
+  .items li .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .items li.done .body { color: var(--text-dim); text-decoration: line-through; }
+
+  #demo {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    background: var(--bg-3);
+  }
+  #demo .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  #demo .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  #demo button {
+    background: var(--bg-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #demo button:hover:not(:disabled) { background: var(--bg); }
+  #demo button:disabled { opacity: 0.5; cursor: wait; }
+  #demo button#reset-clock {
+    margin-left: auto;
+    color: var(--text-dim);
+  }
+  #demo button#reset-clock:hover:not(:disabled) { color: var(--text); }
+  #demo .clock { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  #demo .clock.sim { color: var(--tight); font-weight: 600; }
+
+  .empty { color: var(--text-dim); padding: 20px; text-align: center; font-size: 13px; }
+
+  /* Sidebar loading skeleton — shown while list_goals / get_goal are in
+     flight, both on initial page load and on manual refresh. */
+  .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .skeleton-card {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .skeleton-line {
+    height: 10px;
+    background: linear-gradient(
+      90deg,
+      var(--bg-3) 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      var(--bg-3) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
+    margin: 6px 0;
+  }
+  .skeleton-line.title { width: 60%; height: 12px; margin-bottom: 10px; }
+  .skeleton-line.meta  { width: 40%; height: 10px; margin-bottom: 12px; }
+  .skeleton-line.item  { width: 85%; }
+  .skeleton-line.item.short { width: 65%; }
+  @keyframes skeleton-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <section id="chat">
+    <div id="messages">
+      <div class="msg sys">
+        Hi. Tell me about a goal — something with a deadline that depends on other people, like an application, a visa, or a form you need signed. I'll track it.
+      </div>
+    </div>
+    <form id="composer">
+      <textarea id="input" rows="1" placeholder="Type a message…"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </section>
+
+  <aside id="sidebar">
+    <header>
+      <h1>Goals</h1>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <div id="goals">
+      <div class="skeleton-wrap" id="goals-skeleton">
+        <div class="skeleton-card">
+          <div class="skeleton-line title"></div>
+          <div class="skeleton-line meta"></div>
+          <div class="skeleton-line item"></div>
+          <div class="skeleton-line item short"></div>
+          <div class="skeleton-line item"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-line title"></div>
+          <div class="skeleton-line meta"></div>
+          <div class="skeleton-line item"></div>
+          <div class="skeleton-line item short"></div>
+        </div>
+      </div>
+    </div>
+    <div id="demo">
+      <div class="label">Demo / test aid</div>
+      <div class="row">
+        <button type="button" data-advance="1">+1 day</button>
+        <button type="button" data-advance="2">+2 days</button>
+        <button type="button" data-advance="5">+5 days</button>
+        <button type="button" id="reset-clock" title="Reset the simulated clock to real time">⟲ reset</button>
+      </div>
+      <div class="clock" id="clock">Clock: real time</div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// MCP client
+// ---------------------------------------------------------------------------
+
+const MCP_URL = '/mcp';
+const MCP_TIMEOUT_MS = 30_000;
+
+async function mcpCall(toolName, args = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
+  try {
+    const body = {
+      jsonrpc: '2.0',
+      id: Date.now(),
+      method: 'tools/call',
+      params: { name: toolName, arguments: args },
+    };
+    const res = await fetch(MCP_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`MCP HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error.message ?? 'MCP error');
+    const text = json.result?.content?.[0]?.text ?? '';
+    try { return JSON.parse(text); } catch { return text; }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function advanceDays(n) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
+  try {
+    const res = await fetch('/demo/advance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: n }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`advance HTTP ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resetClock() {
+  const res = await fetch('/demo/reset', { method: 'POST' });
+  if (!res.ok) throw new Error(`reset HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// DOM refs
+// ---------------------------------------------------------------------------
+
+const $messages = document.getElementById('messages');
+const $input    = document.getElementById('input');
+const $send     = document.getElementById('send');
+const $composer = document.getElementById('composer');
+const $goals    = document.getElementById('goals');
+const $refresh  = document.getElementById('refresh');
+const $clock    = document.getElementById('clock');
+const $resetBtn = document.getElementById('reset-clock');
+
+// ---------------------------------------------------------------------------
+// Chat rendering
+// ---------------------------------------------------------------------------
+
+function addMessage(kind, text, meta) {
+  const div = document.createElement('div');
+  div.className = `msg ${kind}`;
+  div.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  $messages.appendChild(div);
+  $messages.scrollTop = $messages.scrollHeight;
+  return div;
+}
+
+function resolvePending(pendingEl, kind, text, meta) {
+  pendingEl.className = `msg ${kind}`;
+  pendingEl.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    pendingEl.appendChild(m);
+  }
+  $messages.scrollTop = $messages.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Clock label
+// ---------------------------------------------------------------------------
+
+function updateClockLabel(result) {
+  const dateStr = result.now.slice(0, 10);
+  if (result.simulated && typeof result.offset_days === 'number') {
+    const off = Math.round(result.offset_days);
+    const sign = off >= 0 ? '+' : '';
+    $clock.textContent = `Clock: ${dateStr} (${sign}${off}d from real)`;
+    $clock.classList.add('sim');
+  } else {
+    $clock.textContent = `Clock: ${dateStr} (real)`;
+    $clock.classList.remove('sim');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar loading skeleton
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace the sidebar contents with the loading skeleton. Called before
+ * list_goals is issued on initial page load and on manual refresh.
+ * Note: on refresh we deliberately keep the current sidebar visible during
+ * the fetch, and only replace with skeleton if the sidebar is empty.
+ */
+function showSidebarSkeleton() {
+  $goals.innerHTML = `
+    <div class="skeleton-wrap" id="goals-skeleton">
+      <div class="skeleton-card">
+        <div class="skeleton-line title"></div>
+        <div class="skeleton-line meta"></div>
+        <div class="skeleton-line item"></div>
+        <div class="skeleton-line item short"></div>
+        <div class="skeleton-line item"></div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton-line title"></div>
+        <div class="skeleton-line meta"></div>
+        <div class="skeleton-line item"></div>
+        <div class="skeleton-line item short"></div>
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Composer
+// ---------------------------------------------------------------------------
+
+$composer.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $input.value.trim();
+  if (!text) return;
+  $input.value = '';
+  $input.style.height = 'auto';
+  $send.disabled = true;
+
+  addMessage('user', text);
+  const pending = addMessage('thinking', 'Thinking');
+
+  try {
+    const response = await mcpCall('report_statement', { text });
+    const message = response?.message ?? '(no message)';
+    resolvePending(pending, 'sys', message, `intent: ${response?.intent ?? '?'}`);
+    await refreshSidebar();
+  } catch (err) {
+    const isAbort = err.name === 'AbortError';
+    resolvePending(pending, 'error',
+      isAbort ? 'The server took too long to respond (30s).' : `Error: ${err.message}`);
+  } finally {
+    $send.disabled = false;
+    $input.focus();
+  }
+});
+
+$input.addEventListener('input', () => {
+  $input.style.height = 'auto';
+  $input.style.height = Math.min($input.scrollHeight, 140) + 'px';
+});
+$input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $composer.requestSubmit();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+$refresh.addEventListener('click', refreshSidebar);
+
+async function refreshSidebar({ showSkeleton = false } = {}) {
+  $refresh.disabled = true;
+  $refresh.textContent = '…';
+  if (showSkeleton) showSidebarSkeleton();
+
+  try {
+    const list = await mcpCall('list_goals', {});
+    const goals = Array.isArray(list?.goals) ? list.goals : [];
+
+    if (goals.length === 0) {
+      $goals.innerHTML = '<div class="empty">No goals yet.</div>';
+      return;
+    }
+
+    const detailed = await Promise.all(
+      goals.map((g) => mcpCall('get_goal', { goal_id: g.id, event_limit: 5 }))
+    );
+
+    $goals.innerHTML = '';
+    for (const d of detailed) {
+      if (!d || !d.goal) continue;
+      $goals.appendChild(renderGoalCard(d));
+    }
+  } catch (err) {
+    $goals.innerHTML = `<div class="empty">Could not load goals: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    $refresh.disabled = false;
+    $refresh.textContent = 'Refresh';
+  }
+}
+
+function renderGoalCard(detail) {
+  const { goal, requirements } = detail;
+  const card = document.createElement('div');
+  card.className = 'goal';
+
+  const h2 = document.createElement('h2');
+  h2.textContent = goal.title;
+  card.appendChild(h2);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `deadline ${goal.deadline}`;
+  if (goal.goal_type) meta.textContent += ` · ${goal.goal_type}`;
+  card.appendChild(meta);
+
+  const ul = document.createElement('ul');
+  ul.className = 'items';
+  const sorted = [...requirements].sort((a, b) => {
+    const ad = a.status === 'done' ? 1 : 0;
+    const bd = b.status === 'done' ? 1 : 0;
+    return ad - bd;
+  });
+  for (const r of sorted) ul.appendChild(renderItem(r));
+  card.appendChild(ul);
+
+  return card;
+}
+
+function renderItem(r) {
+  const li = document.createElement('li');
+  if (r.status === 'done') li.classList.add('done');
+
+  const icon = document.createElement('span');
+  icon.className = 'icon';
+  icon.textContent = statusIcon(r.status);
+  li.appendChild(icon);
+
+  const body = document.createElement('div');
+  body.className = 'body';
+
+  const label = document.createElement('div');
+  label.textContent = r.label;
+  body.appendChild(label);
+
+  const parts = [];
+  if (r.status === 'waiting_on_other' && r.depends_on) parts.push(`with ${r.depends_on}`);
+  if (r.requested_at) parts.push(`requested ${String(r.requested_at).slice(0, 10)}`);
+  if (r.status === 'done' && r.received_at) parts.push(`received ${String(r.received_at).slice(0, 10)}`);
+  if (parts.length) {
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = parts.join(' · ');
+    body.appendChild(sub);
+  }
+
+  li.appendChild(body);
+  return li;
+}
+
+function statusIcon(status) {
+  switch (status) {
+    case 'done':             return '✅';
+    case 'waiting_on_other': return '⏳';
+    case 'in_progress':      return '▶';
+    case 'not_started':      return '⬜';
+    default:                 return '?';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// ---------------------------------------------------------------------------
+// Demo time advance / reset
+// ---------------------------------------------------------------------------
+
+function setDemoButtonsDisabled(disabled) {
+  document.querySelectorAll('#demo [data-advance]').forEach((b) => (b.disabled = disabled));
+  if ($resetBtn) $resetBtn.disabled = disabled;
+}
+
+document.querySelectorAll('#demo [data-advance]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const days = Number(btn.dataset.advance);
+    setDemoButtonsDisabled(true);
+    try {
+      const result = await advanceDays(days);
+      updateClockLabel(result);
+      addMessage('sys',
+        `(Demo) Time advanced to ${result.now.slice(0, 10)}.`,
+        'demo control');
+      if (result.proactive_message) {
+        addMessage('sys', result.proactive_message, 'proactive flag');
+      }
+      await refreshSidebar();
+    } catch (err) {
+      const isAbort = err.name === 'AbortError';
+      addMessage('error',
+        isAbort ? 'The server took too long (30s).' : `Advance failed: ${err.message}`);
+    } finally {
+      setDemoButtonsDisabled(false);
+    }
+  });
+});
+
+if ($resetBtn) {
+  $resetBtn.addEventListener('click', async () => {
+    setDemoButtonsDisabled(true);
+    try {
+      const result = await resetClock();
+      updateClockLabel(result);
+      addMessage('sys', `(Demo) Clock reset to real time: ${result.now.slice(0, 10)}.`, 'demo control');
+      await refreshSidebar();
+    } catch (err) {
+      addMessage('error', `Reset failed: ${err.message}`);
+    } finally {
+      setDemoButtonsDisabled(false);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Initial load
+//
+// On first load we explicitly show the skeleton before calling list_goals,
+// so the sidebar doesn't sit empty while the fetch is in flight. On later
+// refresh calls (triggered by the send handler, day advance, reset), we
+// keep the current contents visible instead of flickering to a skeleton —
+// the Refresh button already shows a "…" while it works.
+// ---------------------------------------------------------------------------
+
+showSidebarSkeleton();
+refreshSidebar();
+$input.focus();
+</script>
+</body>
+</html>
