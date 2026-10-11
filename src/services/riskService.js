@@ -3,9 +3,6 @@
 // Pure functions. No I/O. No LLM. No clock import.
 // `today` and `deadline` are passed in; everything is computed from them
 // plus the current requirements.
-//
-// See the design note in the PR/commit for the reasoning behind the
-// thresholds and the critical-path definition.
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -24,12 +21,8 @@ export const DEFAULT_UNKNOWN_TURNAROUND_DAYS = 3;
  */
 export const CLOSE_DEADLINE_DAYS = 2;
 
-/** Slack thresholds, in days. See design note. */
+/** Slack thresholds, in days. */
 export const THRESHOLDS = Object.freeze({
-  // slack_days < 0        -> critical (only if deadline is close) OR at_risk
-  // 0  <= slack < AT_RISK -> at_risk
-  // AT_RISK <= slack < TIGHT -> tight
-  // TIGHT <= slack        -> ok
   AT_RISK: 2,
   TIGHT: 5,
 });
@@ -99,6 +92,28 @@ export function computeRisk(goal, requirements, today) {
     externals.length === 0 ? 0 : Math.max(...externals.map((e) => e.remaining));
   const criticalPathDays = maxRemainingExternal + BUFFER_DAYS;
 
+  const slackDays = daysUntilDeadline - criticalPathDays;
+
+  // --- Early return: nothing to be at risk about --------------------------
+  //
+  // If every item on the goal is done, the goal is on track by definition.
+  // The buffer and critical path describe work that has to happen; if
+  // there is no work left, they don't apply. This must come before the
+  // level logic, or a fully-done goal with a short deadline will be
+  // flagged as at_risk purely because the buffer doesn't fit.
+  if (outstanding.length === 0) {
+    return {
+      risk_level: 'ok',
+      slack_days: round1(slackDays),
+      critical_path_days: round1(criticalPathDays),
+      days_until_deadline: round1(daysUntilDeadline),
+      reasons: [],
+      outstanding_count: 0,
+      external_outstanding_count: 0,
+      self_outstanding_count: 0,
+    };
+  }
+
   const drivers = externals.filter(
     (e) => e.remaining === maxRemainingExternal && e.remaining > 0
   );
@@ -115,9 +130,6 @@ export function computeRisk(goal, requirements, today) {
     reasons.push({ kind: 'no_external_deps' });
   }
 
-  // --- Slack ---------------------------------------------------------------
-  const slackDays = daysUntilDeadline - criticalPathDays;
-
   // --- Self actions --------------------------------------------------------
   if (selfOutstanding.length > 0) {
     reasons.push({
@@ -128,14 +140,6 @@ export function computeRisk(goal, requirements, today) {
   }
 
   // --- Level ---------------------------------------------------------------
-  // "Critical" is reserved for these situations:
-  //   (a) the deadline has passed with outstanding work,
-  //   (b) an outstanding external item is past its expected turnaround,
-  //   (c) the critical path cannot fit in the remaining days AND the
-  //       deadline is close (within CLOSE_DEADLINE_DAYS).
-  //
-  // If negative slack happens with plenty of time left, the correct
-  // signal is "start now" — at_risk, not critical.
   let level;
   if (deadlinePassed && outstanding.length > 0) {
     level = 'critical';

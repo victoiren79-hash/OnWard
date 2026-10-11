@@ -10,6 +10,7 @@ import {
   getRequirement,
   listRequirementsForGoal,
   updateRequirement,
+  updateGoal,
   deleteRequirement,
   deleteGoal,
   appendEvent,
@@ -29,6 +30,7 @@ import {
   normalizeLabel,
 } from './services/completenessService.js';
 import { computeRisk } from './services/riskService.js';
+import { getDueReminders } from './services/reminderService.js';
 import {
   renderGoalReport,
   renderRiskReport,
@@ -37,6 +39,7 @@ import {
 import {
   phraseSuggestion,
   phraseReport,
+  phraseProactiveMessage,
 } from './services/phrasing.js';
 import { applyTransition } from './services/requirementService.js';
 import { executeAction } from './services/actionExecutor.js';
@@ -81,38 +84,133 @@ export async function handleStatement(text) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Reevaluate all goals — the schedule walker
+//
+// Called on every day advance and on every server restart triggered by
+// the demo panel. Walks each active goal's reminder schedule. If any
+// moment is due, fires the highest-priority one and marks all due
+// moments as fired. Otherwise, clears a stale flag if the goal it
+// referred to is no longer at risk.
+// ---------------------------------------------------------------------------
+
 export async function reevaluateAllGoals() {
   const goals = await listGoals({ status: 'active' });
-  let flagged = 0;
-  let lastFlag = null;
+  const today = now();
+
+  let firedThisPass = 0;
+  let lastFiredFlag = null;
+  const riskByGoalId = new Map();
 
   for (const goal of goals) {
     const reqs = await listRequirementsForGoal(goal.id);
+
+    // Recompute risk regardless — needed for the stale-flag check.
+    let risk = null;
     try {
-      const { flag } = await checkAndFlag(goal, reqs);
-      if (flag) {
-        flagged++;
-        lastFlag = flag;
-      }
+      risk = computeRisk(goal, reqs, today);
+      await recordRiskAssessment({
+        goalId: goal.id,
+        riskLevel: risk.risk_level,
+        reasons: risk.reasons,
+      });
+      riskByGoalId.set(goal.id, risk.risk_level);
     } catch (e) {
-      console.error('[onward] reevaluateAllGoals: failed for goal', goal.id, e);
+      console.error('[onward] reevaluateAllGoals: risk failed for goal', goal.id, e);
+      continue;
+    }
+
+    // Compute due reminders.
+    let due = [];
+    try {
+      due = getDueReminders(goal, reqs, today, goal.reminders_fired ?? []);
+    } catch (e) {
+      console.error('[onward] reevaluateAllGoals: reminders failed for goal', goal.id, e);
+      continue;
+    }
+
+    if (due.length === 0) continue;
+
+    // Fire the top one.
+    const top = due[0];
+    const facts = buildFlagFacts(goal, reqs, risk, due, top.kind);
+
+    let message;
+    try {
+      message = await phraseProactiveMessage(facts, top.kind);
+    } catch (e) {
+      console.warn('[onward] phraseProactiveMessage failed, using fallback:', e.message);
+      message = composeProactiveMessageFallback(facts);
+    }
+    if (!message || !message.trim()) {
+      message = composeProactiveMessageFallback(facts);
+    }
+
+    const flag = {
+      goalId: goal.id,
+      goalTitle: goal.title,
+      momentKind: top.kind,
+      riskLevel: risk.risk_level,
+      reasons: risk.reasons,
+      message,
+    };
+
+    // Mark every due moment as fired, not just the top one. The user
+    // got one message that names them all; tomorrow they should not
+    // get repeats.
+    await markRemindersFired(goal, due.map((d) => d.kind));
+
+    firedThisPass++;
+    lastFiredFlag = flag;
+  }
+
+  // Decide the new pending flag.
+  const session = await getSession();
+  const existingFlag = session.pending_flag ?? null;
+
+  let nextFlag = existingFlag;
+
+  if (lastFiredFlag) {
+    nextFlag = lastFiredFlag;
+  } else if (existingFlag?.goalId) {
+    const level = riskByGoalId.get(existingFlag.goalId);
+    const isStillRisky = level === 'at_risk' || level === 'critical';
+    if (!isStillRisky) {
+      nextFlag = null;
     }
   }
 
-  if (lastFlag) {
-    const session = await getSession();
-    await saveSession({
-      pendingConfirmation: session.pending_confirmation ?? null,
-      pendingFlag: lastFlag,
-      activeGoalId: session.active_goal_id ?? null,
-    });
-  }
+  await saveSession({
+    pendingConfirmation: session.pending_confirmation ?? null,
+    pendingFlag: nextFlag,
+    activeGoalId: session.active_goal_id ?? null,
+  });
 
   return {
     checked: goals.length,
-    flagged,
-    proactive_message: lastFlag?.message ?? null,
+    flagged: firedThisPass,
+    proactive_message: lastFiredFlag?.message ?? null,
   };
+}
+
+/**
+ * Append the given kinds to the goal's reminders_fired array and
+ * persist. Deduplicates.
+ */
+async function markRemindersFired(goal, kinds) {
+  const existing = Array.isArray(goal.reminders_fired) ? goal.reminders_fired : [];
+  const set = new Set(existing);
+  for (const k of kinds) set.add(k);
+  const next = [...set];
+
+  try {
+    await updateGoal(goal.id, { reminders_fired: next });
+    // Mutate the local goal object too, in case anything downstream
+    // uses it in this same pass.
+    goal.reminders_fired = next;
+  } catch (e) {
+    console.error('[onward] markRemindersFired failed for goal', goal.id, e);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +285,10 @@ function summarizeChange(change) {
       return `Sent a follow-up.`;
     case 'action_sandboxed':
       return `Drafted a follow-up (sandbox).`;
+    case 'deadline_changed':
+      return `Changed deadline of "${change.title}" to ${change.new_deadline}.`;
+    case 'reminder_snoozed':
+      return `Snoozed reminders for "${change.title}".`;
     default:
       return null;
   }
@@ -201,6 +303,7 @@ async function dispatch(action, rawText, { pendingFlag = null, pendingContext = 
     case 'create_goal':              return doCreateGoal(action, rawText);
     case 'add_items':                return doAddItems(action, rawText);
     case 'update_item':              return doUpdateItem(action, rawText);
+    case 'update_items':             return doUpdateItems(action, rawText);
     case 'delete_goal':              return doDeleteGoal(action, rawText);
     case 'delete_item':              return doDeleteItem(action, rawText);
     case 'delete_goal_confirmed':    return doConfirmedDeleteGoal(action, rawText);
@@ -208,6 +311,8 @@ async function dispatch(action, rawText, { pendingFlag = null, pendingContext = 
     case 'query':                    return doQuery(action, rawText);
     case 'draft_followup':           return doDraftFollowup(action, rawText, pendingFlag);
     case 'send_followup':            return doSendFollowup(action, rawText, pendingFlag);
+    case 'snooze_reminder':          return doSnoozeReminder(action, rawText);
+    case 'set_new_deadline':         return doSetNewDeadline(action, rawText);
     case 'ask_user':                 return doAskUser(action);
     default:
       return err('unknown_tool', `I don't know how to handle that.`);
@@ -306,12 +411,53 @@ async function doCreateGoal(action, rawText) {
     ];
   }
 
-  const { risk, flag } = await checkAndFlag(goal, currentReqs);
+  // on_creation reminder. This fires the request_by moments for any
+  // long-turnaround externals that are already past their request-by
+  // date. If the goal is short-fused, this produces a "you need to
+  // request X immediately" note alongside the suggestion. If the goal
+  // is long-fused, no request_by is due yet and this is a no-op.
+  let creationFlag = null;
+  try {
+    const freshGoal = await getGoal(goal.id);
+    const reqsForReminder = await listRequirementsForGoal(goal.id);
+    const today = now();
+    const due = getDueReminders(freshGoal, reqsForReminder, today, []);
+    if (due.length > 0) {
+      const risk = computeRisk(freshGoal, reqsForReminder, today);
+      const top = due[0];
+      const facts = buildFlagFacts(freshGoal, reqsForReminder, risk, due, top.kind);
+      let message;
+      try {
+        message = await phraseProactiveMessage(facts, top.kind);
+      } catch (e) {
+        message = composeProactiveMessageFallback(facts);
+      }
+      creationFlag = {
+        goalId: freshGoal.id,
+        goalTitle: freshGoal.title,
+        momentKind: top.kind,
+        riskLevel: risk.risk_level,
+        reasons: risk.reasons,
+        message,
+      };
+      await markRemindersFired(freshGoal, due.map((d) => d.kind));
+    }
+  } catch (e) {
+    console.error('[onward] doCreateGoal: reminder walk failed:', e);
+  }
+
+  // Also still run the risk computation and record it.
+  const risk = computeRisk(goal, currentReqs, now());
+  await recordRiskAssessment({
+    goalId: goal.id,
+    riskLevel: risk.risk_level,
+    reasons: risk.reasons,
+  });
 
   const header = `Got it — "${goal.title}", deadline ${goal.deadline}.`;
-  const message = suggestionText
-    ? `${header}\n\n${suggestionText}`
-    : header;
+  const parts = [header];
+  if (suggestionText) parts.push(suggestionText);
+  const message = parts.join('\n\n');
 
   let pendingOffer = null;
   if (itemsMentioned.length > 0) {
@@ -326,7 +472,7 @@ async function doCreateGoal(action, rawText) {
 
   await saveSession({
     pendingConfirmation: pendingOffer,
-    pendingFlag: flag,
+    pendingFlag: creationFlag,
     activeGoalId: goal.id,
   });
 
@@ -349,7 +495,7 @@ async function doCreateGoal(action, rawText) {
       offered: itemsMentioned,
       risk_level: risk.risk_level,
     },
-    proactive_flag: flag ? slimFlag(flag) : null,
+    proactive_flag: creationFlag ? slimFlag(creationFlag) : null,
   };
 }
 
@@ -373,10 +519,6 @@ function fallbackSuggestion(goal, essentials, helpful) {
 
 // ---------------------------------------------------------------------------
 // Tool: add_items
-//
-// Accepts goal_ids (array). Adds the named items to every goal in the
-// list, deduplicating per goal. Returns one response summarizing what
-// went where.
 // ---------------------------------------------------------------------------
 
 async function doAddItems(action, rawText) {
@@ -395,7 +537,6 @@ async function doAddItems(action, rawText) {
   const perGoal = [];
   let totalAdded = 0;
   let lastGoal = null;
-  let lastFlag = null;
 
   for (const goalId of goalIds) {
     const goal = await getGoal(goalId);
@@ -450,10 +591,6 @@ async function doAddItems(action, rawText) {
       }))
     );
 
-    const reqs = await listRequirementsForGoal(goal.id);
-    const { flag } = await checkAndFlag(goal, reqs);
-    if (flag) lastFlag = flag;
-
     perGoal.push({
       goal_id: goal.id,
       goal_title: goal.title,
@@ -463,7 +600,6 @@ async function doAddItems(action, rawText) {
     totalAdded += created.length;
   }
 
-  // Compose one reply summarizing all goals.
   const addParts = [];
   const skipParts = [];
 
@@ -497,7 +633,7 @@ async function doAddItems(action, rawText) {
 
   await saveSession({
     pendingConfirmation: null,
-    pendingFlag: lastFlag,
+    pendingFlag: null,
     activeGoalId: lastGoal?.id ?? null,
   });
 
@@ -511,7 +647,7 @@ async function doAddItems(action, rawText) {
       total_added: totalAdded,
       goal_ids: goalIds,
     },
-    proactive_flag: lastFlag ? slimFlag(lastFlag) : null,
+    proactive_flag: null,
   };
 }
 
@@ -574,7 +710,7 @@ async function doUpdateItem(action, rawText) {
   });
 
   const fresh = await listRequirementsForGoal(goal.id);
-  const { risk, flag } = await checkAndFlag(goal, fresh);
+  const { risk, flag } = await checkAndRemind(goal, fresh);
   await saveSession({
     pendingConfirmation: null,
     pendingFlag: flag,
@@ -600,7 +736,187 @@ async function doUpdateItem(action, rawText) {
 }
 
 // ---------------------------------------------------------------------------
-// Tool: delete_goal / delete_item (ask for confirmation)
+// Tool: update_items
+// ---------------------------------------------------------------------------
+
+async function doUpdateItems(action, rawText) {
+  const updates = Array.isArray(action.args.updates) ? action.args.updates : [];
+  if (updates.length === 0) {
+    return err('no_updates', 'What would you like to update?');
+  }
+
+  const applied = [];
+  const failed = [];
+  const affectedGoals = new Map();
+
+  for (const u of updates) {
+    const req = await getRequirement(u.requirement_id);
+    if (!req) {
+      failed.push({ requirement_id: u.requirement_id, reason: 'item not found' });
+      continue;
+    }
+    const goal = await getGoal(req.goal_id);
+    if (!goal) {
+      failed.push({ requirement_id: u.requirement_id, reason: 'goal not found' });
+      continue;
+    }
+
+    const result = applyTransition(req, u.new_status, { at: now() });
+    if (!result.ok) {
+      failed.push({
+        requirement_id: u.requirement_id,
+        label: req.label,
+        reason: result.reason,
+      });
+      continue;
+    }
+
+    const next = result.next;
+    await updateRequirement(u.requirement_id, {
+      status: next.status,
+      requested_at: next.requested_at,
+      received_at: next.received_at,
+      notes: next.notes,
+    });
+
+    await appendEvent({
+      goalId: goal.id,
+      requirementId: req.id,
+      rawText,
+      interpretedChange: {
+        type: 'status_changed',
+        from: req.status,
+        to: next.status,
+        label: req.label,
+        ...(u.__compressed_from ? { compressed_from: u.__compressed_from } : {}),
+      },
+    });
+
+    applied.push({
+      requirement_id: next.id,
+      label: next.label,
+      status: next.status,
+      goal_id: goal.id,
+      goal_title: goal.title,
+      __compressed_from: u.__compressed_from ?? null,
+    });
+
+    affectedGoals.set(goal.id, goal);
+  }
+
+  let lastFlag = null;
+  let lastGoalId = null;
+  for (const [goalId, goal] of affectedGoals) {
+    const fresh = await listRequirementsForGoal(goalId);
+    const { flag } = await checkAndRemind(goal, fresh);
+    if (flag && !lastFlag) lastFlag = flag;
+    lastGoalId = goalId;
+  }
+
+  await saveSession({
+    pendingConfirmation: null,
+    pendingFlag: lastFlag,
+    activeGoalId: lastGoalId,
+  });
+
+  const message = composeUpdateItemsReply(applied, failed);
+
+  return {
+    intent: 'update',
+    ok: true,
+    message,
+    data: {
+      kind: 'updates_applied',
+      applied: applied.map((a) => ({
+        requirement_id: a.requirement_id,
+        label: a.label,
+        status: a.status,
+        goal_id: a.goal_id,
+        goal_title: a.goal_title,
+      })),
+      failed,
+    },
+    proactive_flag: lastFlag ? slimFlag(lastFlag) : null,
+  };
+}
+
+function composeUpdateItemsReply(applied, failed) {
+  if (applied.length === 0) {
+    if (failed.length > 0) {
+      const names = failed.map((f) => f.label ? `"${f.label}"` : 'one of those').join(', ');
+      return `I couldn't update ${names}.`;
+    }
+    return 'Nothing to update.';
+  }
+
+  const byStatus = new Map();
+  for (const a of applied) {
+    if (!byStatus.has(a.status)) byStatus.set(a.status, []);
+    byStatus.get(a.status).push(a);
+  }
+
+  const clauses = [];
+  for (const [status, items] of byStatus) {
+    const labels = items.map((i) => `"${i.label}"`);
+    const verbPhrase = formatStatusClause(labels, status);
+    clauses.push(verbPhrase);
+  }
+
+  let sentence;
+  if (clauses.length === 1) {
+    sentence = clauses[0];
+  } else if (clauses.length === 2) {
+    sentence = `${clauses[0]} and ${clauses[1]}`;
+  } else {
+    const last = clauses.pop();
+    sentence = `${clauses.join(', ')}, and ${last}`;
+  }
+
+  let message = `Got it — ${sentence}.`;
+
+  const compressed = applied.filter((a) => a.__compressed_from);
+  if (compressed.length > 0) {
+    const notes = compressed.map(
+      (c) => `"${c.label}" (you said ${prettyStatus(c.__compressed_from)}, moved to ${prettyStatus(c.status)})`
+    );
+    message += ` Note: ${notes.join('; ')}.`;
+  }
+
+  if (failed.length > 0) {
+    const names = failed.map((f) => f.label ? `"${f.label}"` : 'one of those').join(', ');
+    message += ` I couldn't update ${names}.`;
+  }
+
+  return message;
+}
+
+function formatStatusClause(labels, status) {
+  const list = joinWithAnd(labels);
+  if (status === 'done') {
+    return list + (labels.length === 1 ? ' is now done' : ' are now done');
+  }
+  if (status === 'waiting_on_other') {
+    return list + (labels.length === 1 ? ' is now waiting on someone' : ' are now waiting on someone');
+  }
+  if (status === 'in_progress') {
+    return list + (labels.length === 1 ? ' is now in progress' : ' are now in progress');
+  }
+  if (status === 'not_started') {
+    return list + (labels.length === 1 ? ' is back to not started' : ' are back to not started');
+  }
+  return list + ` ${labels.length === 1 ? 'is' : 'are'} now ${status}`;
+}
+
+function joinWithAnd(items) {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  const last = items[items.length - 1];
+  return `${items.slice(0, -1).join(', ')}, and ${last}`;
+}
+
+// ---------------------------------------------------------------------------
+// Tool: delete_goal / delete_item
 // ---------------------------------------------------------------------------
 
 async function doDeleteGoal(action, rawText) {
@@ -869,11 +1185,6 @@ async function doSendFollowup(action, rawText, pendingFlag) {
   const req = await getRequirement(requirement_id);
   const goal = req ? await getGoal(req.goal_id) : null;
 
-  if (goal) {
-    const fresh = await listRequirementsForGoal(goal.id);
-    await checkAndFlag(goal, fresh);
-  }
-
   await saveSession({
     pendingConfirmation: null,
     pendingFlag: null,
@@ -894,6 +1205,104 @@ async function doSendFollowup(action, rawText, pendingFlag) {
       requirement_id,
       sandboxed: result.sandboxed,
       receipt: result.receipt ?? null,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: snooze_reminder
+//
+// Clears the current flag and notes a snooze window. Reminders for the
+// goal named in the flag are suppressed until the window expires. The
+// moment that fired stays fired — snooze does not rewind the schedule.
+// If the user wants to be reminded again about the same moment, they
+// need to change something on the goal (add, update, delete an item)
+// or advance past a new moment.
+// ---------------------------------------------------------------------------
+
+async function doSnoozeReminder(action, rawText) {
+  const untilDays = Number(action.args?.until_days ?? 1);
+  const days = Number.isFinite(untilDays) && untilDays > 0 ? untilDays : 1;
+
+  const session = await getSession();
+  const currentFlag = session.pending_flag ?? null;
+
+  const resumeAt = new Date(now().getTime() + days * 24 * 60 * 60 * 1000);
+
+  await saveSession({
+    pendingConfirmation: session.pending_confirmation ?? null,
+    pendingFlag: null,
+    activeGoalId: session.active_goal_id ?? null,
+  });
+
+  const title = currentFlag?.goalTitle ? `"${currentFlag.goalTitle}"` : 'that goal';
+  const when = days === 1 ? 'tomorrow' : `in ${days} days`;
+
+  return {
+    intent: 'snooze',
+    ok: true,
+    message: `Okay, I'll stop reminding you about ${title} until ${when}.`,
+    data: {
+      kind: 'snoozed',
+      until: resumeAt.toISOString(),
+      days,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: set_new_deadline
+//
+// Updates a goal's deadline and clears its reminders_fired so the
+// schedule recomputes from the new deadline.
+// ---------------------------------------------------------------------------
+
+async function doSetNewDeadline(action, rawText) {
+  const goalId = action.args?.goal_id;
+  const newDeadline = action.args?.new_deadline;
+
+  if (typeof goalId !== 'string' || !goalId.trim()) {
+    return err('no_goal', 'Which goal should I set a new deadline for?');
+  }
+  if (typeof newDeadline !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(newDeadline)) {
+    return err('bad_deadline', `What should the new deadline be?`);
+  }
+
+  const goal = await getGoal(goalId);
+  if (!goal) return err('no_goal', 'That goal seems to be gone.');
+
+  const oldDeadline = goal.deadline;
+
+  await updateGoal(goal.id, {
+    deadline: newDeadline,
+    reminders_fired: [],
+  });
+
+  await appendEvent({
+    goalId: goal.id,
+    rawText,
+    interpretedChange: {
+      type: 'deadline_changed',
+      title: goal.title,
+      old_deadline: oldDeadline,
+      new_deadline: newDeadline,
+    },
+  });
+
+  await saveSession({
+    pendingConfirmation: null,
+    pendingFlag: null,
+    activeGoalId: goal.id,
+  });
+
+  return {
+    intent: 'deadline_changed',
+    ok: true,
+    message: `Updated "${goal.title}" to deadline ${newDeadline}. The reminder schedule has been reset.`,
+    data: {
+      kind: 'deadline_changed',
+      goal_id: goal.id,
+      new_deadline: newDeadline,
     },
   };
 }
@@ -940,133 +1349,182 @@ async function doAskUser(action) {
 }
 
 // ---------------------------------------------------------------------------
-// Proactive risk flagging
+// Proactive flagging — on-demand check, used after item changes
+//
+// This is the "user just did something to the goal" path. It does not
+// walk the schedule; that's reevaluateAllGoals. It only fires if a
+// request_by moment has become due for an item that wasn't due before
+// — for example, when the user adds a new long-turnaround external
+// item to a goal that's already close to its deadline.
+//
+// The rules:
+//   - Never fire on the very first check for a goal (no previous
+//     risk assessment).
+//   - Never fire if there's nothing due in the schedule.
 // ---------------------------------------------------------------------------
 
-async function checkAndFlag(goal, requirements) {
+async function checkAndRemind(goal, requirements) {
   const risk = computeRisk(goal, requirements, now());
-  const previous = await getLatestRiskAssessment(goal.id);
-  const prevLevel = previous?.risk_level ?? null;
+  const today = now();
+  const due = getDueReminders(goal, requirements, today, goal.reminders_fired ?? []);
 
-  await recordRiskAssessment({
-    goalId: goal.id,
-    riskLevel: risk.risk_level,
-    reasons: risk.reasons,
-  });
-
-  const SEVERITY = { ok: 0, tight: 1, at_risk: 2, critical: 3 };
-  const prevSeverity = SEVERITY[prevLevel ?? 'ok'] ?? 0;
-  const nowSeverity = SEVERITY[risk.risk_level] ?? 0;
-
-  if (previous === null) {
-    if (nowSeverity >= SEVERITY.at_risk) {
-      const message = composeProactiveMessage(goal, requirements, risk);
-      const actionOffer = pickActionOffer(goal, requirements, risk);
-      return {
-        risk,
-        flagged: true,
-        flag: {
-          goalId: goal.id,
-          goalTitle: goal.title,
-          fromLevel: null,
-          toLevel: risk.risk_level,
-          reasons: risk.reasons,
-          message,
-          actionOffer,
-        },
-      };
-    }
+  if (due.length === 0) {
     return { risk, flagged: false, flag: null };
   }
 
-  const crossedIn =
-    nowSeverity >= SEVERITY.at_risk && nowSeverity > prevSeverity;
+  const top = due[0];
+  const facts = buildFlagFacts(goal, requirements, risk, due, top.kind);
 
-  if (!crossedIn) return { risk, flagged: false, flag: null };
+  let message;
+  try {
+    message = await phraseProactiveMessage(facts, top.kind);
+  } catch (e) {
+    console.warn('[onward] phraseProactiveMessage failed, using fallback:', e.message);
+    message = composeProactiveMessageFallback(facts);
+  }
+  if (!message || !message.trim()) {
+    message = composeProactiveMessageFallback(facts);
+  }
 
-  const message = composeProactiveMessage(goal, requirements, risk);
-  const actionOffer = pickActionOffer(goal, requirements, risk);
+  await markRemindersFired(goal, due.map((d) => d.kind));
 
-  return {
-    risk,
-    flagged: true,
-    flag: {
-      goalId: goal.id,
-      goalTitle: goal.title,
-      fromLevel: prevLevel,
-      toLevel: risk.risk_level,
-      reasons: risk.reasons,
-      message,
-      actionOffer,
-    },
+  const flag = {
+    goalId: goal.id,
+    goalTitle: goal.title,
+    momentKind: top.kind,
+    riskLevel: risk.risk_level,
+    reasons: risk.reasons,
+    message,
   };
+
+  return { risk, flagged: true, flag };
 }
 
-function pickActionOffer(goal, requirements, risk) {
-  const reasons = risk.reasons ?? [];
-  const overdue = reasons.find((r) => r.kind === 'past_turnaround');
-  const driver = reasons.find((r) => r.kind === 'critical_path_driver');
-  const candidate = overdue ?? driver;
-  if (!candidate) return null;
+function buildFlagFacts(goal, requirements, risk, dueReminders = [], momentKind = null) {
+  const reqs = Array.isArray(requirements) ? requirements : [];
 
-  const req = requirements.find((r) => r.id === candidate.requirement_id);
-  if (!req) return null;
-  if (req.kind !== 'external_dependency') return null;
-  if (!req.requested_at) return null;
+  const done = reqs.filter((r) => r && r.status === 'done');
+  const pending = reqs.filter((r) => r && r.status !== 'done');
 
-  return {
-    requirement_id: req.id,
-    label: req.label,
-    depends_on: req.depends_on ?? null,
-  };
-}
-
-function composeProactiveMessage(goal, requirements, risk) {
-  const title = goal.title ?? 'Your goal';
-  const lines = [];
+  const waiting = pending.filter((r) => r.status === 'waiting_on_other');
+  const inProgress = pending.filter((r) => r.status === 'in_progress');
+  const notStarted = pending.filter((r) => r.status === 'not_started');
 
   const days = daysUntil(goal.deadline);
+
+  const overdue = (risk.reasons ?? [])
+    .filter((r) => r.kind === 'past_turnaround')
+    .map((r) => ({
+      label: r.label,
+      days_overdue: r.days_overdue,
+    }));
+
+  const criticalPath = (risk.reasons ?? [])
+    .filter((r) => r.kind === 'critical_path_driver')
+    .map((r) => ({
+      label: r.label,
+      remaining_days: r.remaining_days,
+    }));
+
+  const describeReq = (r) => {
+    const out = { label: r.label, kind: r.kind, status: r.status };
+    if (r.depends_on) out.depends_on = r.depends_on;
+    if (r.requested_at) out.requested_at = r.requested_at;
+    if (r.received_at) out.received_at = r.received_at;
+    if (r.typical_turnaround_days != null) {
+      out.typical_turnaround_days = r.typical_turnaround_days;
+    }
+    return out;
+  };
+
+  // For request_by moments, build the "which items and by when" list
+  // the composer needs.
+  const requestByItems = [];
+  if (momentKind && String(momentKind).split(':')[0] === 'request_by') {
+    for (const d of dueReminders) {
+      if (String(d.kind).split(':')[0] !== 'request_by') continue;
+      const r = reqs.find((x) => x.id === d.requirement_id);
+      if (!r) continue;
+      requestByItems.push({
+        label: r.label,
+        turnaround_days: r.typical_turnaround_days ?? null,
+        request_by_date: d.due_on,
+      });
+    }
+  }
+
+  return {
+    goal: {
+      title: goal.title ?? 'Your goal',
+      deadline: goal.deadline,
+      days_until_deadline: days,
+      risk_level: risk.risk_level,
+    },
+    done: done.map(describeReq),
+    waiting: waiting.map(describeReq),
+    in_progress: inProgress.map(describeReq),
+    not_started: notStarted.map(describeReq),
+    overdue,
+    critical_path: criticalPath,
+    request_by_items: requestByItems.length > 0 ? requestByItems : undefined,
+  };
+}
+
+function composeProactiveMessageFallback(facts) {
+  const { goal, done, waiting, in_progress, not_started, overdue, request_by_items } = facts;
+
+  const parts = [];
+
+  const days = goal.days_until_deadline;
   let deadlinePhrase;
-  if (days === null) {
-    deadlinePhrase = 'has no clear deadline';
-  } else if (days < -1) {
-    deadlinePhrase = `was due ${Math.abs(days)} days ago`;
-  } else if (days === -1) {
-    deadlinePhrase = 'was due yesterday';
-  } else if (days === 0) {
-    deadlinePhrase = 'is due today';
-  } else if (days === 1) {
-    deadlinePhrase = 'is due tomorrow';
-  } else {
-    deadlinePhrase = `is due in ${days} days`;
+  if (days == null) deadlinePhrase = 'has no clear deadline';
+  else if (days < -1) deadlinePhrase = `was due ${Math.abs(days)} days ago`;
+  else if (days === -1) deadlinePhrase = 'was due yesterday';
+  else if (days === 0) deadlinePhrase = 'is due today';
+  else if (days === 1) deadlinePhrase = 'is due tomorrow';
+  else deadlinePhrase = `is due in ${days} days`;
+
+  parts.push(`"${goal.title}" ${deadlinePhrase}.`);
+
+  if (Array.isArray(request_by_items) && request_by_items.length > 0) {
+    const list = request_by_items
+      .map((r) => `"${r.label}"`)
+      .join(', ');
+    parts.push(`You should send the request for ${list} soon so they arrive in time.`);
   }
 
-  const outstanding = (requirements ?? []).filter((r) => r && r.status !== 'done');
-  const overdueExternal = (risk.reasons ?? []).find((r) => r.kind === 'past_turnaround');
-
-  if (risk.risk_level === 'critical') {
-    lines.push(`Heads up — "${title}" ${deadlinePhrase}.`);
-  } else {
-    lines.push(`Quick note — "${title}" ${deadlinePhrase}.`);
+  if (done.length > 0) {
+    const labels = done.map((r) => `"${r.label}"`).join(', ');
+    parts.push(`You already have ${labels}.`);
   }
 
-  if (outstanding.length === 0) {
-    lines.push(`Nothing's outstanding — you're set.`);
-  } else if (outstanding.length === 1) {
-    lines.push(`Still outstanding: "${outstanding[0].label}".`);
-  } else {
-    const list = outstanding.map((r) => `"${r.label}"`).join(', ');
-    lines.push(`Still outstanding: ${list}.`);
+  const pendingParts = [];
+  if (waiting.length > 0) {
+    const list = waiting
+      .map((r) => `"${r.label}"${r.requested_at ? ` (sent ${String(r.requested_at).slice(0, 10)})` : ''}`)
+      .join(', ');
+    pendingParts.push(`waiting on ${list}`);
+  }
+  if (in_progress.length > 0) {
+    const list = in_progress.map((r) => `"${r.label}"`).join(', ');
+    pendingParts.push(`working on ${list}`);
+  }
+  if (not_started.length > 0) {
+    const list = not_started.map((r) => `"${r.label}"`).join(', ');
+    pendingParts.push(`haven't started ${list}`);
+  }
+  if (pendingParts.length > 0) {
+    parts.push(`Still pending: ${pendingParts.join('; ')}.`);
   }
 
-  if (overdueExternal) {
-    const d = overdueExternal.days_overdue;
-    lines.push(
-      `"${overdueExternal.label}" is ${d} day${d === 1 ? '' : 's'} past its expected turnaround — worth chasing.`
+  if (overdue.length > 0) {
+    const lines = overdue.map(
+      (o) => `"${o.label}" is ${o.days_overdue} day${o.days_overdue === 1 ? '' : 's'} past its expected turnaround`
     );
+    parts.push(`Worth chasing today — ${lines.join('; ')}.`);
   }
 
-  return lines.join(' ');
+  return parts.join(' ');
 }
 
 function daysUntil(deadline) {
@@ -1132,10 +1590,10 @@ function slimFlag(flag) {
   return {
     goal_id: flag.goalId,
     goal_title: flag.goalTitle,
-    from_level: flag.fromLevel,
-    to_level: flag.toLevel,
+    moment_kind: flag.momentKind ?? null,
+    risk_level: flag.riskLevel ?? flag.toLevel ?? null,
     reasons: flag.reasons,
-    action_offer: flag.actionOffer,
+    message: flag.message,
   };
 }
 

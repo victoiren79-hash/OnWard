@@ -25,6 +25,11 @@ export const KNOWN_GOAL_TYPES = Object.freeze([
   'job_application_with_references',
   'grant_application',
   'signed_form_return',
+  'school_enrollment',
+  'camp_registration',
+  'doctor_appointment_paperwork',
+  'lease_signing',
+  'tax_filing',
 ]);
 
 export const REQUIREMENT_STATUSES = Object.freeze(['not_started', 'done']);
@@ -99,6 +104,61 @@ const GOAL_TYPE_SIGNALS = [
       /\bsignature\s+from\b/i,
     ],
   },
+  {
+    type: 'school_enrollment',
+    patterns: [
+      /\benroll\b/i,
+      /\benrollment\b/i,
+      /\benrolling\b/i,
+      /\bkindergarten\b/i,
+      /\bpre-?school\b/i,
+      /\bpre-?k\b/i,
+      /\belementary\s+school\b/i,
+      /\bregister\s+(my|our)\s+(kid|child|son|daughter)\s+(in|for)\s+school\b/i,
+    ],
+  },
+  {
+    type: 'camp_registration',
+    patterns: [
+      /\bsummer\s+camp\b/i,
+      /\bcamp\s+registration\b/i,
+      /\bregister\s+(my|our)\s+(kid|child|son|daughter)\s+for\s+(a\s+)?camp\b/i,
+      /\bsign\s+(my|our)\s+(kid|child|son|daughter)\s+up\s+for\s+camp\b/i,
+      /\bafter-?school\s+program\b/i,
+    ],
+  },
+  {
+    type: 'doctor_appointment_paperwork',
+    patterns: [
+      /\bdoctor'?s?\s+appointment\b/i,
+      /\bspecialist\b/i,
+      /\bsurgery\b/i,
+      /\bmedical\s+procedure\b/i,
+      /\bmedical\s+appointment\b/i,
+      /\bprior\s+authorization\b/i,
+      /\breferral\s+from\b/i,
+    ],
+  },
+  {
+    type: 'lease_signing',
+    patterns: [
+      /\blease\s+agreement\b/i,
+      /\bsign\s+(a\s+)?(new\s+)?lease\b/i,
+      /\brenew\s+(my\s+|the\s+)?lease\b/i,
+      /\brent(al)?\s+agreement\b/i,
+      /\bmove\s+(into|in\s+to)\s+(an?\s+)?(apartment|house)\b/i,
+    ],
+  },
+  {
+    type: 'tax_filing',
+    patterns: [
+      /\bfile\s+(my\s+|our\s+)?tax(es)?\b/i,
+      /\btax\s+return\b/i,
+      /\bW-?2\b/i,
+      /\b1099\b/i,
+      /\bIRS\b/i,
+    ],
+  },
 ];
 
 /**
@@ -151,6 +211,11 @@ KNOWN GOAL TYPES (use the exact string):
 - job_application_with_references — applying for a job, an internship, a position at a company
 - grant_application               — grant or funding applications (typically institutional)
 - signed_form_return              — getting a form signed and returned by someone
+- school_enrollment               — enrolling a child in a school, kindergarten, or pre-school
+- camp_registration               — registering a child for summer camp or an after-school program
+- doctor_appointment_paperwork    — specialist visits, medical procedures, referrals, insurance paperwork
+- lease_signing                   — signing or renewing a residential lease
+- tax_filing                      — filing personal income taxes
 
 RULES:
 1. If the message is NOT a goal with a deadline (e.g. small talk, questions,
@@ -202,6 +267,26 @@ RULES:
        "signed form", "signature", "get it signed", "countersign",
        "return the form"
 
+     school_enrollment signals:
+       "enroll", "enrollment", "enrolling", "kindergarten", "pre-school",
+       "pre-K", "elementary school", "register my child for school",
+       "register my kid in school", "register my son/daughter for school"
+
+     camp_registration signals:
+       "summer camp", "camp registration", "after-school program",
+       "register my child for camp", "sign my kid up for camp"
+
+     doctor_appointment_paperwork signals:
+       "doctor's appointment", "specialist", "surgery", "medical procedure",
+       "medical appointment", "prior authorization", "referral from"
+
+     lease_signing signals:
+       "lease agreement", "sign a lease", "renew my lease", "rental agreement",
+       "move into an apartment", "move into a house"
+
+     tax_filing signals:
+       "file my taxes", "file taxes", "tax return", "W-2", "1099", "IRS"
+
    If TWO OR MORE signals appear, pick the one whose signal is most
    specific to the primary goal the user is describing. If NO signal
    appears, set goal_type to null.
@@ -230,6 +315,17 @@ Examples:
   { "is_goal": true, "title": "Grad school application to MIT",
     "deadline": "<resolved>",
     "goal_type": "grad_scholarship_application",
+    "requirements": [] }
+
+- "I need to enroll my daughter in school before November 15" →
+  { "is_goal": true, "title": "School enrollment for my daughter",
+    "deadline": "<resolved>",
+    "goal_type": "school_enrollment",
+    "requirements": [] }
+
+- "I have to file my taxes by April 15" →
+  { "is_goal": true, "title": "File taxes", "deadline": "<resolved>",
+    "goal_type": "tax_filing",
     "requirements": [] }
 
 - "what's the weather like" → { "is_goal": false }

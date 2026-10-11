@@ -1,7 +1,7 @@
 // Onward — one-shot seed script for GoalTypeTemplate.
 //
-// Inserts the five supported goal types and their commonly-required items.
-// Idempotent per goal type: deletes existing rows for the five types below,
+// Inserts the supported goal types and their commonly-required items.
+// Idempotent per goal type: deletes existing rows for the types below,
 // then re-inserts. Does not touch Goal / Requirement / Event / RiskAssessment.
 //
 // Run once with:  node src/seed.js
@@ -14,7 +14,7 @@ import 'dotenv/config';
 import { supabase } from './db.js';
 
 // ---------------------------------------------------------------------------
-// The five goal types. Keep these keys stable — services will match on them.
+// The goal types. Keep these keys stable — services will match on them.
 // ---------------------------------------------------------------------------
 
 const TEMPLATES = [
@@ -111,6 +111,123 @@ const TEMPLATES = [
       { label: 'Countersignature (if required)',    kind: 'external_dependency', typical_turnaround_days: 5, is_commonly_missed: true,  priority: 'helpful' },
       { label: 'Form sent to signatory',            kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
       { label: 'Signed copy submitted to final recipient', kind: 'self_action', typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // 6. School enrollment
+  //
+  // Enrolling a child in a new school, kindergarten, or pre-school. The
+  // school needs documents the parent often has to request from other
+  // institutions — birth certificate from vital records, immunization
+  // records from a previous provider.
+  // -------------------------------------------------------------------------
+  {
+    goal_type: 'school_enrollment',
+    items: [
+      // Essential
+      { label: 'Birth certificate',                  kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Proof of residence',                 kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Immunization / vaccination records', kind: 'external_dependency', typical_turnaround_days: 10, is_commonly_missed: true,  priority: 'essential' },
+
+      // Helpful
+      { label: 'Enrollment form submitted to school',    kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Previous school records / report cards', kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Medical / dental examination form',      kind: 'external_dependency', typical_turnaround_days: 10, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Emergency contact information',          kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Any required school fee paid',           kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // 7. Camp registration
+  //
+  // Summer camp, sports camp, or after-school program registration.
+  // Similar shape to school enrollment, shorter timeline, payment upfront.
+  // -------------------------------------------------------------------------
+  {
+    goal_type: 'camp_registration',
+    items: [
+      // Essential
+      { label: 'Registration form submitted',  kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'essential' },
+      { label: 'Payment or deposit made',      kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Immunization records on file', kind: 'external_dependency', typical_turnaround_days: 10, is_commonly_missed: true,  priority: 'essential' },
+
+      // Helpful
+      { label: 'Emergency contact form',              kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Medical release / allergy form',      kind: 'external_dependency', typical_turnaround_days: 7,  is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Insurance information submitted',     kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Pickup authorization list',           kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // 8. Doctor appointment paperwork
+  //
+  // A specialist visit, procedure, or referral — the paperwork and
+  // prior-authorization dance. Often involves records from other
+  // providers and an insurance approval that has a real turnaround.
+  // -------------------------------------------------------------------------
+  {
+    goal_type: 'doctor_appointment_paperwork',
+    items: [
+      // Essential
+      { label: 'Insurance card / policy number ready',     kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Referral from primary care (if required)', kind: 'external_dependency', typical_turnaround_days: 7,  is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Prior authorization from insurance',       kind: 'external_dependency', typical_turnaround_days: 10, is_commonly_missed: true,  priority: 'essential' },
+
+      // Helpful
+      { label: 'New patient forms filled out',               kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Previous medical records transferred',       kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'List of current medications',                kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Payment / copay prepared',                   kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // 9. Lease signing
+  //
+  // Signing or renewing a residential lease. The essentials are income
+  // proof and identification, both of which often need to be requested
+  // from other parties (employer, bank).
+  // -------------------------------------------------------------------------
+  {
+    goal_type: 'lease_signing',
+    items: [
+      // Essential
+      { label: 'Government-issued photo ID',                  kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'essential' },
+      { label: 'Proof of income (pay stubs or offer letter)', kind: 'external_dependency', typical_turnaround_days: 7,  is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Signed lease agreement',                      kind: 'external_dependency', typical_turnaround_days: 5,  is_commonly_missed: false, priority: 'essential' },
+
+      // Helpful
+      { label: 'Security deposit paid',                kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Renters insurance proof',              kind: 'external_dependency', typical_turnaround_days: 5,  is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'References from previous landlord',    kind: 'external_dependency', typical_turnaround_days: 7,  is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Utility setup scheduled',              kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'helpful' },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // 10. Tax filing
+  //
+  // Filing personal income taxes by the deadline. Almost entirely
+  // external dependencies — W-2s from employers, 1099s from clients,
+  // and the prior year's return from storage.
+  // -------------------------------------------------------------------------
+  {
+    goal_type: 'tax_filing',
+    items: [
+      // Essential
+      { label: 'W-2 forms from all employers',                     kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'essential' },
+      { label: 'Government-issued ID and Social Security number',  kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'essential' },
+      { label: 'Prior year tax return',                            kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'essential' },
+
+      // Helpful
+      { label: '1099 forms for freelance or contract income', kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Records of deductible expenses',              kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Mortgage interest statement (Form 1098)',     kind: 'external_dependency', typical_turnaround_days: 14, is_commonly_missed: true,  priority: 'helpful' },
+      { label: 'Charitable donation receipts',                kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
+      { label: 'Return filed (or extension requested)',       kind: 'self_action',         typical_turnaround_days: null, is_commonly_missed: false, priority: 'helpful' },
     ],
   },
 ];

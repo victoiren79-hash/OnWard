@@ -1,11 +1,12 @@
 // Onward — natural-language phrasing over deterministic data.
 //
-// Four functions:
+// Five functions:
 //   - phraseSuggestion(goal, essentials, helpful, opts)  → { text, items_mentioned }
 //   - phraseCompletenessQuestion(missingItems)           → retained for
 //                                                          compatibility
 //   - phraseReport(reportData)                           → prose over a
 //                                                          report
+//   - phraseProactiveMessage(facts, momentKind)          → the reminder message
 //
 // None writes to the database. None invents facts.
 
@@ -15,18 +16,6 @@ import { callLLM, callLLMText } from '../llm.js';
 // phraseSuggestion
 // ---------------------------------------------------------------------------
 
-/**
- * Produce a natural one-to-three-sentence suggestion for a newly created
- * goal. Returns both the prose and the list of item labels the prose named,
- * so the caller can save a pending offer that "add them" will resolve
- * against.
- *
- * The items_mentioned list is validated deterministically: after the LLM
- * returns, we scan the text for every input label (essentials + helpful)
- * and add any that appears verbatim but was omitted from the JSON. This
- * means the caller can trust that "add them" will add everything the
- * prose named, not just what the model remembered to list.
- */
 export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
   const essentialsList = Array.isArray(essentials) ? essentials : [];
   const helpfulList = Array.isArray(helpful) ? helpful : [];
@@ -67,7 +56,23 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
     '- Vary your opening. Do not always start with "Got it" or "For this',
     '  goal". Rotate between: a factual note, a question, a mild',
     '  observation, a concrete next step.',
-    '- End with an open question or an offer, not a yes/no.',
+    '',
+    '- ENDING. The ONLY two things you may invite the user to do are:',
+    '    1. Tell you which of the named items they already have.',
+    '    2. Say yes to adding the named items to their checklist.',
+    '  Your closing question must map cleanly onto one of those two.',
+    '  Good endings:',
+    '    "Which of those do you already have?"',
+    '    "Want me to add those to your checklist?"',
+    '    "Tell me what you already have and I\'ll fill in the rest."',
+    '  Bad endings — never write anything like these:',
+    '    "Would you like me to outline a timeline?"',
+    '    "Do you want help planning the next steps?"',
+    '    "Shall I map out a schedule?"',
+    '    "Want me to draft a plan?"',
+    '  The system cannot plan, outline, schedule, or draft. Do not',
+    '  promise capabilities it does not have.',
+    '',
     '- Do not use em-dashes. Do not use exclamation marks.',
     '- Keep the tone warm but not effusive.',
     '',
@@ -133,12 +138,6 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
     ? raw.items_mentioned.filter((x) => typeof x === 'string' && x.trim())
     : [];
 
-  // Deterministic validation. Build the set of valid labels from the
-  // inputs. Then:
-  //   1. Keep only model-mentioned labels that are actually in the inputs.
-  //   2. Add any input label that appears verbatim in the text but the
-  //      model forgot to list.
-  //   3. Ensure every essential is present (they must be named).
   const allLabels = [
     ...essentialsList.map((e) => e.label),
     ...helpfulList.map((h) => h.label),
@@ -148,7 +147,6 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
   const finalMentioned = [];
   const seen = new Set();
 
-  // Step 1 — model's list, filtered to real labels, in original order.
   for (const m of modelMentioned) {
     if (validLabels.has(m) && !seen.has(m)) {
       finalMentioned.push(m);
@@ -156,8 +154,6 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
     }
   }
 
-  // Step 2 — scan the text for any input label that appears verbatim.
-  // Case-insensitive so a lowercased mention in prose still matches.
   const textLower = text.toLowerCase();
   for (const label of allLabels) {
     if (seen.has(label)) continue;
@@ -167,7 +163,6 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
     }
   }
 
-  // Step 3 — every essential must be in the list.
   for (const e of essentialsList) {
     if (!seen.has(e.label)) {
       finalMentioned.push(e.label);
@@ -342,6 +337,166 @@ export async function phraseReport(reportData) {
   }
 
   return raw.prose.trim();
+}
+
+// ---------------------------------------------------------------------------
+// phraseProactiveMessage
+//
+// The reminder message. Facts are computed deterministically upstream.
+// The caller passes the moment kind that fired so the message can lead
+// with the right framing: a request_by leads with "you need to send the
+// request by <date>", a seven_days_out leads with "one week left", and
+// so on.
+//
+// Throws on LLM failure so the caller can fall back to the deterministic
+// composer.
+// ---------------------------------------------------------------------------
+
+export async function phraseProactiveMessage(facts, momentKind = null) {
+  if (!facts || typeof facts !== 'object') {
+    throw new Error('[onward/phrasing] phraseProactiveMessage: facts must be an object');
+  }
+
+  const rootKind = momentKind ? String(momentKind).split(':')[0] : null;
+
+  const framing = buildFramingForKind(rootKind);
+
+  const systemPrompt = [
+    'You are Onward, writing a short status note about a goal with a',
+    'deadline. The user is busy. Read the facts and write them back in',
+    'plain, natural language — as a person would, not as a form.',
+    '',
+    'You are given:',
+    '  - moment_kind: what triggered this note. It is one of:',
+    '      on_creation     — the goal was just created.',
+    '      request_by      — it is time to request one or more external',
+    '                        items that have a long turnaround, so they',
+    '                        arrive before the deadline.',
+    '      seven_days_out  — the deadline is one week away.',
+    '      two_days_out    — the deadline is two days away.',
+    '      due_today       — the deadline is today.',
+    '      overdue         — the deadline has passed.',
+    '  - goal: title, deadline, days_until_deadline, risk_level.',
+    '  - done: items the user already has or has completed.',
+    '  - waiting: items waiting on someone else, with depends_on and',
+    '    requested_at where present.',
+    '  - in_progress: items the user is actively working on.',
+    '  - not_started: items on the goal that have not been started.',
+    '  - overdue: items past their expected turnaround, with days_overdue.',
+    '  - critical_path: items the timeline is currently waiting on, with',
+    '    remaining_days.',
+    '  - request_by_items: items the request_by moment is about. Only',
+    '    present when moment_kind is request_by. Each has a label, the',
+    '    turnaround in days, and the date by which the request needs to',
+    '    go out.',
+    '',
+    'FRAMING FOR THIS MOMENT:',
+    framing,
+    '',
+    'RULES:',
+    '- Write 2 to 4 short paragraphs separated by blank lines.',
+    '- Paragraph 1: name the goal and when it is due, then set the frame',
+    '  based on the moment above. Follow the FRAMING FOR THIS MOMENT',
+    '  section closely.',
+    '- Paragraph 2: say what the user already has, then what is still',
+    '  pending. Name EVERY item from done, waiting, in_progress, and',
+    '  not_started. Use the labels verbatim.',
+    '- For waiting items, say who it is waiting on and, when requested_at',
+    '  is present, when it was requested. Write it the way a person would:',
+    '  "you sent the request on Nov 1", not "requested_at: 2026-11-01".',
+    '- For items with typical_turnaround_days, mention the turnaround only',
+    '  if it is relevant to the deadline or to the request_by framing.',
+    '- CLOSING LINE. Never reassure the user when work remains.',
+    '    * If done is the only non-empty group — every item is done —',
+    '      the closing may say the goal is set, or nothing is outstanding.',
+    '    * If ANY of waiting, in_progress, or not_started has entries,',
+    '      do NOT say "on track", "looks good", "steady pace", "you\'re',
+    '      set", "nothing to worry about", or any other phrase that',
+    '      implies the goal is fine. Instead, close with a short factual',
+    '      note: name what is still pending, or state the deadline.',
+    '      Tone is factual, not encouraging.',
+    '    * Never write a closing line that contradicts the body above.',
+    '- Vary your openings. Do not always start with "Heads up" or',
+    '  "Quick note". Rotate.',
+    '- Vary the sentence structure for the done group:',
+    '    "You\'ve got X and Y ready." / "X and Y are done." /',
+    '    "You\'re set on X and Y."',
+    '- Vary how you say the pending group.',
+    '- Second person throughout. No bullet points. No numbered lists. No',
+    '  status labels like "waiting_on_other" or "in_progress". Use plain',
+    '  English: "you\'re waiting on" / "you haven\'t started" /',
+    '  "you\'re working on".',
+    '- Do NOT mention any item that is not in the facts.',
+    '- Do NOT offer to do anything. Do NOT say "want me to". The note is',
+    '  informational. The user will act on it if they want to.',
+    '- Keep it under 110 words.',
+    '',
+    'Return plain text only. No JSON, no quotes, no preamble.',
+  ].join('\n');
+
+  const userMessage = JSON.stringify(
+    {
+      moment_kind: rootKind,
+      goal: facts.goal,
+      done: facts.done,
+      waiting: facts.waiting,
+      in_progress: facts.in_progress,
+      not_started: facts.not_started,
+      overdue: facts.overdue,
+      critical_path: facts.critical_path,
+      request_by_items: facts.request_by_items ?? undefined,
+    },
+    null,
+    2
+  );
+
+  const text = await callLLMText(systemPrompt, userMessage, { temperature: 0.7 });
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new Error('[onward/phrasing] phraseProactiveMessage: empty response');
+  }
+  return text.trim();
+}
+
+function buildFramingForKind(rootKind) {
+  const lines = [];
+  switch (rootKind) {
+    case 'on_creation':
+      lines.push('  The goal was just created. Open by acknowledging it and');
+      lines.push('  naming what it will need. Keep it short; the user is');
+      lines.push('  just getting started.');
+      break;
+    case 'request_by':
+      lines.push('  This is a REQUEST-BY reminder. The items below take a long');
+      lines.push('  time to arrive from someone else, and if the request does');
+      lines.push('  not go out soon, they will not arrive before the deadline.');
+      lines.push('  Lead with that. Say which items need to be requested and');
+      lines.push('  when. Use a phrase like "you should send the request for');
+      lines.push('  X by <date>". Do NOT use "today" unless the request-by');
+      lines.push('  date is today or already past.');
+      break;
+    case 'seven_days_out':
+      lines.push('  One week remains. State that plainly and name what is');
+      lines.push('  still to be done.');
+      break;
+    case 'two_days_out':
+      lines.push('  Two days remain. The tone should be more urgent but');
+      lines.push('  still factual. Name what is left.');
+      break;
+    case 'due_today':
+      lines.push('  The deadline is today. Say so plainly. Name what is');
+      lines.push('  still outstanding. No reassurance.');
+      break;
+    case 'overdue':
+      lines.push('  The deadline has passed. State how many days ago. Name');
+      lines.push('  what is still outstanding. End by noting that the user');
+      lines.push('  can say "extend to <new date>" to set a new deadline, or');
+      lines.push('  "continue" to leave it as is.');
+      break;
+    default:
+      lines.push('  No special framing. Write a plain status note.');
+      break;
+  }
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------

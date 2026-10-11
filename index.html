@@ -3,219 +3,575 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Onward</title>
+<title>Onward — for the things that depend on other people</title>
 <style>
   :root {
-    --bg:        #0f1115;
-    --bg-2:      #161923;
-    --bg-3:      #1d212c;
-    --border:    #2a2f3c;
-    --text:      #e7ebf3;
-    --text-dim:  #9aa3b2;
-    --accent:    #5b8cff;
-    --ok:        #4ec9a4;
-    --tight:     #e0c46c;
-    --at-risk:   #e0996c;
-    --critical:  #e06c6c;
-    --user-bg:   #243047;
-    --sys-bg:    #1a1e29;
+    /* Alexa-flavored palette */
+    --bg:            #0a0e1a;
+    --bg-2:          #101627;
+    --bg-3:          #182036;
+    --bg-4:          #202a44;
+    --surface:       #141b2e;
+    --surface-2:     #1a2237;
+    --text:          #eaf1ff;
+    --text-dim:      #8b96b4;
+    --text-mute:     #5c6684;
+
+    --accent:        #00caff;
+    --accent-dim:    #0099cc;
+    --accent-glow:   rgba(0, 202, 255, 0.35);
+    --accent-soft:   rgba(0, 202, 255, 0.12);
+
+    --user-bg:       #1e3a5c;
+    --ok:            #4ee8a8;
+    --tight:         #ffc861;
+    --at-risk:       #ff9c6b;
+    --critical:      #ff6b8a;
+
+    --reminder-bg:   rgba(0, 202, 255, 0.08);
+    --reminder-bord: rgba(0, 202, 255, 0.28);
+    --reminder-text: #bfe6ff;
+
+    --radius-sm:     8px;
+    --radius-md:     14px;
+    --radius-lg:     20px;
+    --radius-pill:   999px;
+
+    --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md:     0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-lg:     0 10px 32px rgba(0, 0, 0, 0.45);
   }
+
   * { box-sizing: border-box; }
+
   html, body { height: 100%; margin: 0; }
+
   body {
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Amazon Ember", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-pill);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
+  * { scrollbar-color: rgba(255, 255, 255, 0.08) transparent; scrollbar-width: thin; }
+
   #app { display: flex; height: 100vh; }
+
+  /* ---------------------------------------------------------------------
+     Chat column
+     --------------------------------------------------------------------- */
 
   #chat {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-width: 0;
-    border-right: 1px solid var(--border);
+    position: relative;
+    background:
+      radial-gradient(ellipse at 20% 0%, rgba(0, 202, 255, 0.06), transparent 55%),
+      var(--bg);
   }
+
+  /* Brand mark — persistent top-left identifier */
+  #brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 24px 4px;
+    user-select: none;
+    flex-wrap: wrap;
+  }
+  #brand .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow), 0 0 4px var(--accent);
+    flex: 0 0 auto;
+    animation: brandPulse 3.2s ease-in-out infinite;
+  }
+  @keyframes brandPulse {
+    0%, 100% { opacity: 0.85; transform: scale(1); }
+    50%      { opacity: 1;    transform: scale(1.15); }
+  }
+  #brand .mark {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  #brand .tag {
+    font-size: 12px;
+    color: var(--text-mute);
+    margin-left: 6px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+
+  /* Reminder card — pinned above chat, Alexa-style ambient notification */
+  #flag-banner {
+    display: none;
+    margin: 16px 20px 0;
+    padding: 14px 18px;
+    background: var(--reminder-bg);
+    border: 1px solid var(--reminder-bord);
+    border-radius: var(--radius-md);
+    color: var(--reminder-text);
+    box-shadow: 0 0 24px rgba(0, 202, 255, 0.08) inset, var(--shadow-md);
+    align-items: flex-start;
+    gap: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  #flag-banner::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 3px 0 0 3px;
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  #flag-banner.visible { display: flex; }
+  #flag-banner .body { flex: 1 1 auto; padding-left: 6px; }
+  #flag-banner .title {
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  #flag-banner .msg {
+    font-size: 14px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    color: var(--text);
+  }
+  #flag-banner .actions {
+    display: flex;
+    align-items: flex-start;
+    margin-left: 12px;
+  }
+  #flag-banner button {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-pill);
+    padding: 6px 14px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  #flag-banner button:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  /* Message stream */
   #messages {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 20px;
+    padding: 24px 20px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 4px;
   }
+
   .msg {
-    max-width: 720px;
-    padding: 10px 14px;
-    border-radius: 10px;
+    max-width: 760px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
     white-space: pre-wrap;
     word-wrap: break-word;
+    animation: msgIn 0.24s ease-out;
   }
-  .msg.user    { align-self: flex-end; background: var(--user-bg); }
-  .msg.sys     { align-self: flex-start; background: var(--sys-bg); border: 1px solid var(--border); }
-  .msg.error   { align-self: flex-start; background: #3a1f1f; border: 1px solid #5a2a2a; }
+
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* User messages — soft rounded capsule, offset to the right */
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bg);
+    border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+    margin: 8px 0 8px 0;
+    max-width: 560px;
+    color: #eaf1ff;
+  }
+
+  /* Assistant messages — plain, wide, no bubble */
+  .msg.sys {
+    align-self: flex-start;
+    padding: 12px 4px;
+    background: transparent;
+    max-width: 720px;
+    color: var(--text);
+    border: none;
+  }
+
+  /* First assistant message — the intro — has a slightly dimmer tone */
+  .msg.sys.intro {
+    color: var(--text-dim);
+    padding-top: 24px;
+  }
+
+  /* Error messages */
+  .msg.error {
+    align-self: flex-start;
+    background: rgba(255, 107, 138, 0.08);
+    border: 1px solid rgba(255, 107, 138, 0.28);
+    color: #ffc5d0;
+    max-width: 620px;
+  }
+
+  /* Thinking indicator */
   .msg.thinking {
     align-self: flex-start;
-    background: var(--sys-bg);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    color: var(--text-mute);
     font-style: italic;
+    padding: 12px 4px;
     min-width: 60px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  .msg.thinking::after {
+  .msg.thinking::before {
     content: '';
-    display: inline-block;
-    width: 6px;
-    animation: pulse 1.2s infinite;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+    animation: thinkPulse 1.4s ease-in-out infinite;
   }
-  @keyframes pulse {
-    0%, 100% { opacity: 0.3; }
-    50%      { opacity: 1; }
+  @keyframes thinkPulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1.1); }
   }
-  .msg .meta { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
 
+  .msg .meta {
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-top: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  /* Composer */
   #composer {
     display: flex;
-    gap: 8px;
-    padding: 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-2);
+    gap: 10px;
+    padding: 16px 20px 20px;
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    align-items: flex-end;
   }
   #input {
     flex: 1 1 auto;
     background: var(--bg-3);
     color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-lg);
+    padding: 12px 18px;
     font: inherit;
+    line-height: 1.5;
     resize: none;
-    min-height: 40px;
-    max-height: 140px;
+    min-height: 48px;
+    max-height: 160px;
+    outline: none;
+    transition: all 0.15s ease;
+  }
+  #input::placeholder { color: var(--text-mute); }
+  #input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft), 0 0 20px rgba(0, 202, 255, 0.08);
+    background: var(--bg-4);
   }
   #send {
+    flex: 0 0 auto;
+    width: 48px;
+    height: 48px;
     background: var(--accent);
-    color: white;
+    color: #041822;
     border: none;
-    border-radius: 8px;
-    padding: 0 18px;
+    border-radius: var(--radius-lg);
     font: inherit;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
     cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 rgba(0, 202, 255, 0);
   }
-  #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #send:hover:not(:disabled) {
+    background: #33d6ff;
+    box-shadow: 0 0 24px var(--accent-glow);
+  }
+  #send:active:not(:disabled) { transform: scale(0.96); }
+  #send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ---------------------------------------------------------------------
+     Sidebar
+     --------------------------------------------------------------------- */
 
   #sidebar {
-    width: 420px;
-    flex: 0 0 420px;
+    width: 400px;
+    flex: 0 0 400px;
     display: flex;
     flex-direction: column;
     background: var(--bg-2);
+    border-left: 1px solid rgba(255, 255, 255, 0.04);
     overflow: hidden;
   }
+
   #sidebar header {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
+    padding: 20px 22px 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
-  #sidebar header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #sidebar header .section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #sidebar header .section-head .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+    flex: 0 0 auto;
+  }
+  #sidebar header h1 {
+    font-size: 12px;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+  }
   #refresh {
     background: transparent;
     color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 10px;
+    border: none;
+    padding: 4px 8px;
     font: inherit;
     font-size: 12px;
     cursor: pointer;
-    min-width: 72px;
+    border-radius: var(--radius-sm);
+    transition: all 0.15s ease;
   }
-  #refresh:disabled { opacity: 0.6; cursor: wait; }
-  #goals { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
+  #refresh:hover:not(:disabled) { color: var(--accent); }
+  #refresh:disabled { opacity: 0.4; cursor: wait; }
+
+  #goals { flex: 1 1 auto; overflow-y: auto; padding: 6px 16px 20px; }
+
   .goal {
-    background: var(--bg-3);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.15s ease;
+    cursor: default;
+  }
+  .goal:hover {
+    background: var(--surface-2);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+  .goal h2 {
+    font-size: 15px;
+    margin: 0 0 4px 0;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .goal .meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+
+  /* Compact progress line at the top of each card */
+  .goal .progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 12px;
   }
-  .goal h2 { font-size: 14px; margin: 0 0 4px 0; font-weight: 600; }
-  .goal .meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .goal .progress .bar {
+    flex: 1 1 auto;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+  }
+  .goal .progress .bar .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+    transition: width 0.3s ease;
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  .goal .progress .count {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+    min-width: 40px;
+    text-align: right;
+  }
 
-  .items { list-style: none; padding: 0; margin: 8px 0 0 0; }
+  .items { list-style: none; padding: 0; margin: 0; }
   .items li {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: flex-start;
-    padding: 4px 0;
-    font-size: 13px;
+    padding: 6px 0;
+    font-size: 13.5px;
+    line-height: 1.5;
   }
-  .items li .icon { flex: 0 0 16px; }
-  .items li .body { flex: 1 1 auto; }
-  .items li .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-  .items li.done .body { color: var(--text-dim); text-decoration: line-through; }
+  .items li .icon {
+    flex: 0 0 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    opacity: 0.9;
+  }
+  .items li .body { flex: 1 1 auto; min-width: 0; }
+  .items li .label { color: var(--text); }
+
+  .items li .sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .items li .sub .badge {
+    font-size: 10.5px;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+  }
+  .items li .sub .badge.accent {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .items li.done .label {
+    color: var(--text-mute);
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ---------------------------------------------------------------------
+     Time travel / demo panel — subtle footer
+     --------------------------------------------------------------------- */
 
   #demo {
-    border-top: 1px solid var(--border);
-    padding: 12px;
+    padding: 14px 20px 18px;
     background: var(--bg-3);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
   }
   #demo .label {
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
-    margin-bottom: 6px;
+    letter-spacing: 0.14em;
+    color: var(--text-mute);
+    margin-bottom: 8px;
   }
-  #demo .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  #demo .row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
   #demo button {
-    background: var(--bg-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  #demo button:hover:not(:disabled) { background: var(--bg); }
-  #demo button:disabled { opacity: 0.5; cursor: wait; }
-  #demo button#reset-clock {
-    margin-left: auto;
+    background: transparent;
     color: var(--text-dim);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-pill);
+    padding: 5px 12px;
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
-  #demo button#reset-clock:hover:not(:disabled) { color: var(--text); }
-  #demo .clock { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
-  #demo .clock.sim { color: var(--tight); font-weight: 600; }
+  #demo button:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: rgba(0, 202, 255, 0.4);
+    background: var(--accent-soft);
+  }
+  #demo button:disabled { opacity: 0.4; cursor: wait; }
+  #demo button#reset-clock { margin-left: auto; }
+  #demo .clock {
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-top: 8px;
+    letter-spacing: 0.02em;
+  }
+  #demo .clock.sim { color: var(--accent); }
 
-  .empty { color: var(--text-dim); padding: 20px; text-align: center; font-size: 13px; }
+  /* ---------------------------------------------------------------------
+     Empty & skeleton states
+     --------------------------------------------------------------------- */
 
-  .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .empty {
+    color: var(--text-mute);
+    padding: 40px 20px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .empty strong {
+    display: block;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; padding: 4px; }
   .skeleton-card {
-    background: var(--bg-3);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 16px;
   }
   .skeleton-line {
     height: 10px;
     background: linear-gradient(
       90deg,
-      var(--bg-3) 0%,
-      rgba(255, 255, 255, 0.05) 50%,
-      var(--bg-3) 100%
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(0, 202, 255, 0.06) 50%,
+      rgba(255, 255, 255, 0.04) 100%
     );
     background-size: 200% 100%;
-    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
     border-radius: 4px;
-    margin: 6px 0;
+    margin: 8px 0;
   }
-  .skeleton-line.title { width: 60%; height: 12px; margin-bottom: 10px; }
-  .skeleton-line.meta  { width: 40%; height: 10px; margin-bottom: 12px; }
+  .skeleton-line.title { width: 55%; height: 12px; margin-bottom: 12px; }
+  .skeleton-line.meta  { width: 35%; height: 10px; margin-bottom: 14px; }
   .skeleton-line.item  { width: 85%; }
-  .skeleton-line.item.short { width: 65%; }
+  .skeleton-line.item.short { width: 62%; }
   @keyframes skeleton-shimmer {
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
@@ -224,26 +580,42 @@
 </head>
 <body>
 <div id="app">
-
   <section id="chat">
+    <div id="brand">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="mark">Onward</span>
+      <span class="tag">for the things that depend on other people</span>
+    </div>
+    <div id="flag-banner">
+      <div class="body">
+        <div class="title" id="flag-title">Heads up</div>
+        <div class="msg" id="flag-message"></div>
+      </div>
+      <div class="actions">
+        <button type="button" id="flag-dismiss">Dismiss</button>
+      </div>
+    </div>
     <div id="messages">
-      <div class="msg sys">
-        Hi. Tell me about a goal — something with a deadline that depends on other people, like an application, a visa, or a form you need signed. I'll track it.
+      <div class="msg sys intro">
+        Hi! I'm Onward. Tell me what you're trying to get done, and when it's due. I'll help you keep track of what's needed, what's still pending, and what needs your attention — so nothing important slips through the cracks.
       </div>
     </div>
     <form id="composer">
-      <textarea id="input" rows="1" placeholder="Type a message…"></textarea>
-      <button id="send" type="submit">Send</button>
+      <textarea id="input" rows="1" placeholder="Tell me what you're working toward…"></textarea>
+      <button id="send" type="submit" aria-label="Send">↑</button>
     </form>
   </section>
 
   <aside id="sidebar">
     <header>
-      <h1>Goals</h1>
+      <div class="section-head">
+        <span class="dot" aria-hidden="true"></span>
+        <h1>Your goals</h1>
+      </div>
       <button id="refresh" type="button">Refresh</button>
     </header>
     <div id="goals">
-      <div class="skeleton-wrap" id="goals-skeleton">
+      <div class="skeleton-wrap">
         <div class="skeleton-card">
           <div class="skeleton-line title"></div>
           <div class="skeleton-line meta"></div>
@@ -260,24 +632,19 @@
       </div>
     </div>
     <div id="demo">
-      <div class="label">Demo / test aid</div>
+      <div class="label">Time travel</div>
       <div class="row">
         <button type="button" data-advance="1">+1 day</button>
         <button type="button" data-advance="2">+2 days</button>
         <button type="button" data-advance="5">+5 days</button>
-        <button type="button" id="reset-clock" title="Reset the simulated clock to real time">⟲ reset</button>
+        <button type="button" id="reset-clock" title="Reset to real time">⟲ reset</button>
       </div>
       <div class="clock" id="clock">Clock: real time</div>
     </div>
   </aside>
-
 </div>
 
 <script>
-// ---------------------------------------------------------------------------
-// MCP client
-// ---------------------------------------------------------------------------
-
 const MCP_URL = '/mcp';
 const MCP_TIMEOUT_MS = 30_000;
 
@@ -285,18 +652,10 @@ async function mcpCall(toolName, args = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
   try {
-    const body = {
-      jsonrpc: '2.0',
-      id: Date.now(),
-      method: 'tools/call',
-      params: { name: toolName, arguments: args },
-    };
+    const body = { jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: toolName, arguments: args } };
     const res = await fetch(MCP_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -305,26 +664,17 @@ async function mcpCall(toolName, args = {}) {
     if (json.error) throw new Error(json.error.message ?? 'MCP error');
     const text = json.result?.content?.[0]?.text ?? '';
     try { return JSON.parse(text); } catch { return text; }
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 async function advanceDays(n) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
   try {
-    const res = await fetch('/demo/advance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days: n }),
-      signal: controller.signal,
-    });
+    const res = await fetch('/demo/advance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: n }), signal: controller.signal });
     if (!res.ok) throw new Error(`advance HTTP ${res.status}`);
     return res.json();
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 async function resetClock() {
@@ -333,21 +683,50 @@ async function resetClock() {
   return res.json();
 }
 
-// ---------------------------------------------------------------------------
-// DOM refs
-// ---------------------------------------------------------------------------
+async function fetchPendingFlag() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
+  try {
+    const res = await fetch('/demo/pending-flag', { method: 'GET', signal: controller.signal });
+    if (!res.ok) throw new Error(`pending-flag HTTP ${res.status}`);
+    return res.json();
+  } finally { clearTimeout(timer); }
+}
 
 const $messages = document.getElementById('messages');
-const $input    = document.getElementById('input');
-const $send     = document.getElementById('send');
+const $input = document.getElementById('input');
+const $send = document.getElementById('send');
 const $composer = document.getElementById('composer');
-const $goals    = document.getElementById('goals');
-const $refresh  = document.getElementById('refresh');
-const $clock    = document.getElementById('clock');
+const $goals = document.getElementById('goals');
+const $refresh = document.getElementById('refresh');
+const $clock = document.getElementById('clock');
 const $resetBtn = document.getElementById('reset-clock');
+const $flagBanner = document.getElementById('flag-banner');
+const $flagTitle = document.getElementById('flag-title');
+const $flagMessage = document.getElementById('flag-message');
+const $flagDismiss = document.getElementById('flag-dismiss');
 
 // ---------------------------------------------------------------------------
-// Chat rendering
+// Reminder banner
+// ---------------------------------------------------------------------------
+
+function showFlagBanner(flag) {
+  if (!flag || !flag.message) { hideFlagBanner(); return; }
+  $flagTitle.textContent = flag.goal_title ? flag.goal_title : 'Heads up';
+  $flagMessage.textContent = flag.message;
+  $flagBanner.classList.add('visible');
+}
+
+function hideFlagBanner() {
+  $flagBanner.classList.remove('visible');
+}
+
+$flagDismiss.addEventListener('click', () => {
+  hideFlagBanner();
+});
+
+// ---------------------------------------------------------------------------
+// Message rendering
 // ---------------------------------------------------------------------------
 
 function addMessage(kind, text, meta) {
@@ -386,36 +765,12 @@ function updateClockLabel(result) {
   if (result.simulated && typeof result.offset_days === 'number') {
     const off = Math.round(result.offset_days);
     const sign = off >= 0 ? '+' : '';
-    $clock.textContent = `Clock: ${dateStr} (${sign}${off}d from real)`;
+    $clock.textContent = `Clock: ${dateStr} (${sign}${off}d)`;
     $clock.classList.add('sim');
   } else {
-    $clock.textContent = `Clock: ${dateStr} (real)`;
+    $clock.textContent = `Clock: ${dateStr}`;
     $clock.classList.remove('sim');
   }
-}
-
-// ---------------------------------------------------------------------------
-// Sidebar loading skeleton
-// ---------------------------------------------------------------------------
-
-function showSidebarSkeleton() {
-  $goals.innerHTML = `
-    <div class="skeleton-wrap" id="goals-skeleton">
-      <div class="skeleton-card">
-        <div class="skeleton-line title"></div>
-        <div class="skeleton-line meta"></div>
-        <div class="skeleton-line item"></div>
-        <div class="skeleton-line item short"></div>
-        <div class="skeleton-line item"></div>
-      </div>
-      <div class="skeleton-card">
-        <div class="skeleton-line title"></div>
-        <div class="skeleton-line meta"></div>
-        <div class="skeleton-line item"></div>
-        <div class="skeleton-line item short"></div>
-      </div>
-    </div>
-  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,27 +784,25 @@ $composer.addEventListener('submit', async (e) => {
   $input.value = '';
   $input.style.height = 'auto';
   $send.disabled = true;
-
   addMessage('user', text);
   const pending = addMessage('thinking', 'Thinking');
 
   try {
     const response = await mcpCall('report_statement', { text });
     const message = response?.message ?? '(no message)';
-    resolvePending(pending, 'sys', message, `intent: ${response?.intent ?? '?'}`);
+    resolvePending(pending, 'sys', message, null);
 
-    // Optimistic sidebar update: if the response concerns exactly one
-    // goal, refresh only that card. Otherwise, do a full refresh.
-    const touchedGoalId = pickTouchedGoalId(response);
-    if (touchedGoalId) {
-      await refreshOneGoal(touchedGoalId);
-    } else {
-      await refreshSidebar();
+    if (response?.proactive_flag) {
+      showFlagBanner(response.proactive_flag);
     }
+
+    const touchedGoalId = pickTouchedGoalId(response);
+    if (touchedGoalId) await refreshOneGoal(touchedGoalId);
+    else await refreshSidebar();
   } catch (err) {
     const isAbort = err.name === 'AbortError';
     resolvePending(pending, 'error',
-      isAbort ? 'The server took too long to respond (30s).' : `Error: ${err.message}`);
+      isAbort ? 'That took too long. Try again.' : `Something went wrong: ${err.message}`);
   } finally {
     $send.disabled = false;
     $input.focus();
@@ -458,13 +811,10 @@ $composer.addEventListener('submit', async (e) => {
 
 $input.addEventListener('input', () => {
   $input.style.height = 'auto';
-  $input.style.height = Math.min($input.scrollHeight, 140) + 'px';
+  $input.style.height = Math.min($input.scrollHeight, 160) + 'px';
 });
 $input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    $composer.requestSubmit();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $composer.requestSubmit(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -473,90 +823,58 @@ $input.addEventListener('keydown', (e) => {
 
 $refresh.addEventListener('click', refreshSidebar);
 
-async function refreshSidebar({ showSkeleton = false } = {}) {
+async function refreshSidebar() {
   $refresh.disabled = true;
-  $refresh.textContent = '…';
-  if (showSkeleton) showSidebarSkeleton();
-
   try {
     const list = await mcpCall('list_goals', {});
     const goals = Array.isArray(list?.goals) ? list.goals : [];
-
     if (goals.length === 0) {
-      $goals.innerHTML = '<div class="empty">No goals yet.</div>';
+      $goals.innerHTML = `
+        <div class="empty">
+          <strong>No goals yet.</strong>
+          Tell Onward what you're working toward and when it's due.
+        </div>`;
       return;
     }
-
-    const detailed = await Promise.all(
-      goals.map((g) => mcpCall('get_goal', { goal_id: g.id, event_limit: 5 }))
-    );
-
+    const detailed = await Promise.all(goals.map((g) => mcpCall('get_goal', { goal_id: g.id, event_limit: 5 })));
     $goals.innerHTML = '';
     for (const d of detailed) {
-      if (!d || !d.goal) continue;
-      $goals.appendChild(renderGoalCard(d));
+      if (d?.goal) $goals.appendChild(renderGoalCard(d));
     }
   } catch (err) {
-    $goals.innerHTML = `<div class="empty">Could not load goals: ${escapeHtml(err.message)}</div>`;
+    $goals.innerHTML = `<div class="empty"><strong>Couldn't load goals.</strong>${escapeHtml(err.message)}</div>`;
   } finally {
     $refresh.disabled = false;
-    $refresh.textContent = 'Refresh';
   }
 }
 
-/**
- * Refresh a single goal's card in place. If the goal no longer exists,
- * refresh the whole sidebar.
- */
 async function refreshOneGoal(goalId) {
-  const existing = $goals.querySelector(
-    `.goal[data-goal-id="${cssEscape(goalId)}"]`
-  );
-
+  const existing = $goals.querySelector(`.goal[data-goal-id="${cssEscape(goalId)}"]`);
   let detail;
   try {
     detail = await mcpCall('get_goal', { goal_id: goalId, event_limit: 5 });
-  } catch (e) {
-    await refreshSidebar();
-    return;
-  }
-
-  if (!detail || !detail.goal) {
-    await refreshSidebar();
-    return;
-  }
-
+  } catch { await refreshSidebar(); return; }
+  if (!detail?.goal) { await refreshSidebar(); return; }
   const newCard = renderGoalCard(detail);
-
-  if (existing) {
-    existing.replaceWith(newCard);
-  } else {
-    // New goal — remove the empty-state placeholder if present, then
-    // append.
+  if (existing) existing.replaceWith(newCard);
+  else {
     const empty = $goals.querySelector('.empty');
     if (empty) empty.remove();
     $goals.appendChild(newCard);
   }
 }
 
-/**
- * Inspect a report_statement response and return a single goal id if the
- * response concerns exactly one goal. Returns null otherwise.
- */
 function pickTouchedGoalId(response) {
   const d = response?.data;
   if (!d || typeof d !== 'object') return null;
-
   if (d.goal?.id) return d.goal.id;
   if (d.goal_id) return d.goal_id;
   if (d.requirement?.goal_id) return d.requirement.goal_id;
-
+  if (Array.isArray(d.goal_ids) && d.goal_ids.length === 1) return d.goal_ids[0];
   return null;
 }
 
-function cssEscape(s) {
-  return String(s).replace(/["\\]/g, '\\$&');
-}
+function cssEscape(s) { return String(s).replace(/["\\]/g, '\\$&'); }
 
 function renderGoalCard(detail) {
   const { goal, requirements } = detail;
@@ -570,17 +888,31 @@ function renderGoalCard(detail) {
 
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `deadline ${goal.deadline}`;
-  if (goal.goal_type) meta.textContent += ` · ${goal.goal_type}`;
+  meta.textContent = `due ${goal.deadline}`;
+  if (goal.goal_type) meta.textContent += ` · ${prettyType(goal.goal_type)}`;
   card.appendChild(meta);
+
+  // Progress bar
+  const total = requirements.length;
+  const done = requirements.filter((r) => r.status === 'done').length;
+  const progress = document.createElement('div');
+  progress.className = 'progress';
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  const fill = document.createElement('div');
+  fill.className = 'fill';
+  fill.style.width = total > 0 ? `${(done / total) * 100}%` : '0%';
+  bar.appendChild(fill);
+  progress.appendChild(bar);
+  const count = document.createElement('div');
+  count.className = 'count';
+  count.textContent = `${done}/${total}`;
+  progress.appendChild(count);
+  card.appendChild(progress);
 
   const ul = document.createElement('ul');
   ul.className = 'items';
-  const sorted = [...requirements].sort((a, b) => {
-    const ad = a.status === 'done' ? 1 : 0;
-    const bd = b.status === 'done' ? 1 : 0;
-    return ad - bd;
-  });
+  const sorted = [...requirements].sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0));
   for (const r of sorted) ul.appendChild(renderItem(r));
   card.appendChild(ul);
 
@@ -600,17 +932,24 @@ function renderItem(r) {
   body.className = 'body';
 
   const label = document.createElement('div');
+  label.className = 'label';
   label.textContent = r.label;
   body.appendChild(label);
 
-  const parts = [];
-  if (r.status === 'waiting_on_other' && r.depends_on) parts.push(`with ${r.depends_on}`);
-  if (r.requested_at) parts.push(`requested ${String(r.requested_at).slice(0, 10)}`);
-  if (r.status === 'done' && r.received_at) parts.push(`received ${String(r.received_at).slice(0, 10)}`);
-  if (parts.length) {
+  const badges = [];
+  if (r.depends_on) badges.push({ text: r.depends_on, accent: r.status === 'waiting_on_other' });
+  if (r.requested_at) badges.push({ text: `requested ${String(r.requested_at).slice(0, 10)}` });
+  if (r.status === 'done' && r.received_at) badges.push({ text: `received ${String(r.received_at).slice(0, 10)}` });
+
+  if (badges.length) {
     const sub = document.createElement('div');
     sub.className = 'sub';
-    sub.textContent = parts.join(' · ');
+    for (const b of badges) {
+      const span = document.createElement('span');
+      span.className = 'badge' + (b.accent ? ' accent' : '');
+      span.textContent = b.text;
+      sub.appendChild(span);
+    }
     body.appendChild(sub);
   }
 
@@ -620,22 +959,24 @@ function renderItem(r) {
 
 function statusIcon(status) {
   switch (status) {
-    case 'done':             return '✅';
+    case 'done': return '✓';
     case 'waiting_on_other': return '⏳';
-    case 'in_progress':      return '▶';
-    case 'not_started':      return '⬜';
-    default:                 return '?';
+    case 'in_progress': return '◐';
+    case 'not_started': return '○';
+    default: return '·';
   }
 }
 
+function prettyType(t) {
+  return String(t).replace(/_/g, ' ');
+}
+
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ---------------------------------------------------------------------------
-// Demo time advance / reset
+// Time travel
 // ---------------------------------------------------------------------------
 
 function setDemoButtonsDisabled(disabled) {
@@ -650,20 +991,14 @@ document.querySelectorAll('#demo [data-advance]').forEach((btn) => {
     try {
       const result = await advanceDays(days);
       updateClockLabel(result);
-      addMessage('sys',
-        `(Demo) Time advanced to ${result.now.slice(0, 10)}.`,
-        'demo control');
+      addMessage('sys', `Time advanced to ${result.now.slice(0, 10)}.`, 'time travel');
       if (result.proactive_message) {
-        addMessage('sys', result.proactive_message, 'proactive flag');
+        showFlagBanner({ goal_title: null, message: result.proactive_message });
       }
       await refreshSidebar();
     } catch (err) {
-      const isAbort = err.name === 'AbortError';
-      addMessage('error',
-        isAbort ? 'The server took too long (30s).' : `Advance failed: ${err.message}`);
-    } finally {
-      setDemoButtonsDisabled(false);
-    }
+      addMessage('error', `Couldn't advance time: ${err.message}`);
+    } finally { setDemoButtonsDisabled(false); }
   });
 });
 
@@ -673,13 +1008,10 @@ if ($resetBtn) {
     try {
       const result = await resetClock();
       updateClockLabel(result);
-      addMessage('sys', `(Demo) Clock reset to real time: ${result.now.slice(0, 10)}.`, 'demo control');
+      addMessage('sys', `Clock reset to real time (${result.now.slice(0, 10)}).`, 'time travel');
       await refreshSidebar();
-    } catch (err) {
-      addMessage('error', `Reset failed: ${err.message}`);
-    } finally {
-      setDemoButtonsDisabled(false);
-    }
+    } catch (err) { addMessage('error', `Couldn't reset the clock: ${err.message}`); }
+    finally { setDemoButtonsDisabled(false); }
   });
 }
 
@@ -687,8 +1019,15 @@ if ($resetBtn) {
 // Initial load
 // ---------------------------------------------------------------------------
 
-showSidebarSkeleton();
+async function loadInitialFlag() {
+  try {
+    const result = await fetchPendingFlag();
+    if (result?.pending_flag) showFlagBanner(result.pending_flag);
+  } catch { /* ignore */ }
+}
+
 refreshSidebar();
+loadInitialFlag();
 $input.focus();
 </script>
 </body>

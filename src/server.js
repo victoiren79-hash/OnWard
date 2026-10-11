@@ -5,6 +5,7 @@
 //   POST /mcp                  → MCP JSON-RPC
 //   POST /demo/advance         → demo/test aid: advance the in-process clock
 //   POST /demo/reset           → demo/test aid: reset the clock to real time
+//   GET  /demo/pending-flag    → demo/test aid: return the session's pending flag
 
 import 'dotenv/config';
 import http from 'node:http';
@@ -26,6 +27,7 @@ import {
   listEventsForGoal,
   deleteGoal,
   deleteRequirement,
+  getSession,
 } from './db.js';
 import { getSendFollowupTool } from './services/actionExecutor.js';
 
@@ -289,13 +291,13 @@ async function handleDemoAdvance(req, res) {
       }
 
       const {
-        advanceBy,
+        advanceByCumulative,
         now,
         isSimulated,
         simulatedOffsetDays,
       } = await import('./services/clock.js');
 
-      advanceBy(n);
+      advanceByCumulative(n);
 
       let evalResult = { checked: 0, flagged: 0, proactive_message: null };
       try {
@@ -332,6 +334,17 @@ async function handleDemoReset(res) {
       now: now().toISOString(),
       simulated: isSimulated(),
     }));
+  } catch (e) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+async function handleDemoPendingFlag(res) {
+  try {
+    const session = await getSession();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ pending_flag: session.pending_flag ?? null }));
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: e.message }));
@@ -382,6 +395,10 @@ const httpServer = http.createServer(async (req, res) => {
     return handleDemoReset(res);
   }
 
+  if (req.method === 'GET' && req.url === '/demo/pending-flag') {
+    return handleDemoPendingFlag(res);
+  }
+
   if (req.url && req.url.startsWith('/mcp')) {
     if (req.method !== 'POST') {
       res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -410,6 +427,7 @@ httpServer.listen(PORT, () => {
   console.error(`[onward]   MCP:       http://localhost:${PORT}/mcp`);
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/advance`);
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/reset`);
+  console.error(`[onward]   demo:      GET  http://localhost:${PORT}/demo/pending-flag`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
