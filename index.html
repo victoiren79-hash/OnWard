@@ -6,40 +6,47 @@
 <title>Onward — for the things that depend on other people</title>
 <style>
   :root {
-    /* Alexa-flavored palette */
-    --bg:            #0a0e1a;
-    --bg-2:          #101627;
-    --bg-3:          #182036;
-    --bg-4:          #202a44;
-    --surface:       #141b2e;
-    --surface-2:     #1a2237;
-    --text:          #eaf1ff;
-    --text-dim:      #8b96b4;
-    --text-mute:     #5c6684;
+    /* Light, calm, indigo-accented palette */
+    --bg:            #f5f6fa;
+    --bg-2:          #ffffff;
+    --bg-3:          #f0f1f7;
+    --bg-4:          #e8eaf3;
+    --surface:       #ffffff;
+    --surface-2:     #f9fafc;
 
-    --accent:        #00caff;
-    --accent-dim:    #0099cc;
-    --accent-glow:   rgba(0, 202, 255, 0.35);
-    --accent-soft:   rgba(0, 202, 255, 0.12);
+    --text:          #0f1222;
+    --text-dim:      #5b6079;
+    --text-mute:     #8a90a6;
 
-    --user-bg:       #1e3a5c;
-    --ok:            #4ee8a8;
-    --tight:         #ffc861;
-    --at-risk:       #ff9c6b;
-    --critical:      #ff6b8a;
+    --accent:        #5b5bff;
+    --accent-dim:    #4444d6;
+    --accent-glow:   rgba(91, 91, 255, 0.24);
+    --accent-soft:   rgba(91, 91, 255, 0.10);
+    --accent-softer: rgba(91, 91, 255, 0.06);
 
-    --reminder-bg:   rgba(0, 202, 255, 0.08);
-    --reminder-bord: rgba(0, 202, 255, 0.28);
-    --reminder-text: #bfe6ff;
+    --ok:            #22b573;
+    --ok-soft:       rgba(34, 181, 115, 0.12);
+    --warn:          #e8a23c;
+    --warn-soft:     rgba(232, 162, 60, 0.14);
+
+    --border:        #e5e7ee;
+    --border-2:      #eceef4;
+
+    --user-bg:       #5b5bff;
+    --user-text:     #ffffff;
+
+    --reminder-bg:   #eef0ff;
+    --reminder-bord: #d5d8ff;
+    --reminder-text: #2a2c5e;
 
     --radius-sm:     8px;
     --radius-md:     14px;
     --radius-lg:     20px;
     --radius-pill:   999px;
 
-    --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-md:     0 4px 14px rgba(0, 0, 0, 0.35);
-    --shadow-lg:     0 10px 32px rgba(0, 0, 0, 0.45);
+    --shadow-sm:     0 1px 2px rgba(15, 18, 34, 0.05);
+    --shadow-md:     0 2px 8px rgba(15, 18, 34, 0.06);
+    --shadow-lg:     0 8px 28px rgba(15, 18, 34, 0.08);
   }
 
   * { box-sizing: border-box; }
@@ -47,7 +54,7 @@
   html, body { height: 100%; margin: 0; }
 
   body {
-    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Amazon Ember", Roboto, sans-serif;
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
@@ -57,11 +64,11 @@
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(15, 18, 34, 0.10);
     border-radius: var(--radius-pill);
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
-  * { scrollbar-color: rgba(255, 255, 255, 0.08) transparent; scrollbar-width: thin; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(15, 18, 34, 0.18); }
+  * { scrollbar-color: rgba(15, 18, 34, 0.10) transparent; scrollbar-width: thin; }
 
   #app { display: flex; height: 100vh; }
 
@@ -75,79 +82,72 @@
     flex-direction: column;
     min-width: 0;
     position: relative;
-    background:
-      radial-gradient(ellipse at 20% 0%, rgba(0, 202, 255, 0.06), transparent 55%),
-      var(--bg);
+    background: var(--bg);
   }
 
-  /* Brand mark — persistent top-left identifier */
-  #brand {
+  #chat header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 20px 24px 4px;
-    user-select: none;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
   }
-  #brand .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent-glow), 0 0 4px var(--accent);
-    flex: 0 0 auto;
-    animation: brandPulse 3.2s ease-in-out infinite;
-  }
-  @keyframes brandPulse {
-    0%, 100% { opacity: 0.85; transform: scale(1); }
-    50%      { opacity: 1;    transform: scale(1.15); }
-  }
-  #brand .mark {
+  #chat header .title {
     font-size: 15px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 600;
     color: var(--text);
   }
-  #brand .tag {
+  #chat header .subtitle {
     font-size: 12px;
     color: var(--text-mute);
-    margin-left: 6px;
-    font-weight: 400;
-    letter-spacing: 0.01em;
+    margin-top: 2px;
+  }
+  #chat header .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  #chat header .status .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 8px rgba(34, 181, 115, 0.4);
   }
 
-  /* Reminder card — pinned above chat, Alexa-style ambient notification */
+  /* Reminder banner */
   #flag-banner {
     display: none;
-    margin: 16px 20px 0;
-    padding: 14px 18px;
+    margin: 16px 28px 0;
+    padding: 14px 18px 14px 22px;
     background: var(--reminder-bg);
-    border: 1px solid var(--reminder-bord);
+    border: 1px solid var(--warn);
     border-radius: var(--radius-md);
     color: var(--reminder-text);
-    box-shadow: 0 0 24px rgba(0, 202, 255, 0.08) inset, var(--shadow-md);
     align-items: flex-start;
     gap: 14px;
     position: relative;
-    overflow: hidden;
+    box-shadow: var(--shadow-sm);
   }
   #flag-banner::before {
     content: '';
     position: absolute;
     left: 0; top: 0; bottom: 0;
     width: 3px;
-    background: var(--accent);
-    border-radius: 3px 0 0 3px;
-    box-shadow: 0 0 12px var(--accent-glow);
+    background: var(--warn);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
   }
   #flag-banner.visible { display: flex; }
-  #flag-banner .body { flex: 1 1 auto; padding-left: 6px; }
+  #flag-banner .body { flex: 1 1 auto; padding-left: 6px; min-width: 0; }
   #flag-banner .title {
     font-weight: 600;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--warn);
     margin-bottom: 6px;
   }
   #flag-banner .msg {
@@ -155,16 +155,19 @@
     line-height: 1.65;
     white-space: pre-wrap;
     color: var(--text);
+    overflow: visible;
   }
   #flag-banner .actions {
     display: flex;
     align-items: flex-start;
     margin-left: 12px;
+    flex: 0 0 auto;
+    align-self: flex-start;
   }
   #flag-banner button {
     background: transparent;
     color: var(--text-dim);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
     border-radius: var(--radius-pill);
     padding: 6px 14px;
     font: inherit;
@@ -174,84 +177,102 @@
     transition: all 0.15s ease;
   }
   #flag-banner button:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-3);
     color: var(--text);
-    border-color: rgba(255, 255, 255, 0.16);
   }
 
   /* Message stream */
   #messages {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 24px 20px 16px;
+    padding: 24px 28px 16px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 16px;
   }
 
-  .msg {
-    max-width: 760px;
-    padding: 12px 16px;
-    border-radius: var(--radius-md);
-    white-space: pre-wrap;
-    word-wrap: break-word;
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
     animation: msgIn 0.24s ease-out;
   }
+  .row.user { justify-content: flex-end; }
+  .row.sys  { justify-content: flex-start; }
+  .row.error{ justify-content: flex-start; }
 
   @keyframes msgIn {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* User messages — soft rounded capsule, offset to the right */
-  .msg.user {
-    align-self: flex-end;
-    background: var(--user-bg);
-    border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
-    margin: 8px 0 8px 0;
-    max-width: 560px;
-    color: #eaf1ff;
+  .avatar {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .row.user .avatar {
+    background: var(--accent);
+    color: #ffffff;
   }
 
-  /* Assistant messages — plain, wide, no bubble */
-  .msg.sys {
-    align-self: flex-start;
-    padding: 12px 4px;
-    background: transparent;
-    max-width: 720px;
+  .bubble {
+    max-width: 640px;
+    padding: 12px 16px;
+    border-radius: var(--radius-lg);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .row.sys .bubble {
+    background: var(--bg-2);
     color: var(--text);
-    border: none;
+    border: 1px solid var(--border-2);
+    border-top-left-radius: 6px;
+  }
+  .row.sys.intro .bubble {
+    background: var(--accent-softer);
+    border-color: var(--accent-soft);
+    color: var(--text);
+  }
+  .row.user .bubble {
+    background: var(--user-bg);
+    color: var(--user-text);
+    border-top-right-radius: 6px;
+  }
+  .row.error .bubble {
+    background: #fdecef;
+    border: 1px solid #f8cbd4;
+    color: #8a1f38;
   }
 
-  /* First assistant message — the intro — has a slightly dimmer tone */
-  .msg.sys.intro {
-    color: var(--text-dim);
-    padding-top: 24px;
-  }
-
-  /* Error messages */
-  .msg.error {
-    align-self: flex-start;
-    background: rgba(255, 107, 138, 0.08);
-    border: 1px solid rgba(255, 107, 138, 0.28);
-    color: #ffc5d0;
-    max-width: 620px;
-  }
-
-  /* Thinking indicator */
-  .msg.thinking {
-    align-self: flex-start;
-    background: transparent;
-    border: none;
+  .bubble .meta {
+    font-size: 11px;
     color: var(--text-mute);
-    font-style: italic;
-    padding: 12px 4px;
-    min-width: 60px;
+    margin-top: 6px;
+    letter-spacing: 0.02em;
+  }
+
+  /* Thinking bubble */
+  .row.thinking .bubble {
+    background: var(--bg-2);
+    border: 1px solid var(--border-2);
+    color: var(--text-mute);
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
-  .msg.thinking::before {
+  .row.thinking .bubble::before {
     content: '';
     width: 8px;
     height: 8px;
@@ -265,32 +286,25 @@
     50%      { opacity: 1;    transform: scale(1.1); }
   }
 
-  .msg .meta {
-    font-size: 11px;
-    color: var(--text-mute);
-    margin-top: 8px;
-    letter-spacing: 0.02em;
-  }
-
   /* Composer */
   #composer {
     display: flex;
     gap: 10px;
-    padding: 16px 20px 20px;
-    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    padding: 16px 28px 24px;
+    background: var(--bg);
     align-items: flex-end;
   }
   #input {
     flex: 1 1 auto;
-    background: var(--bg-3);
+    background: var(--bg-2);
     color: var(--text);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: var(--radius-lg);
-    padding: 12px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 14px 22px;
     font: inherit;
     line-height: 1.5;
     resize: none;
-    min-height: 48px;
+    min-height: 52px;
     max-height: 160px;
     outline: none;
     transition: all 0.15s ease;
@@ -298,17 +312,16 @@
   #input::placeholder { color: var(--text-mute); }
   #input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft), 0 0 20px rgba(0, 202, 255, 0.08);
-    background: var(--bg-4);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
   #send {
     flex: 0 0 auto;
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
     background: var(--accent);
-    color: #041822;
+    color: #ffffff;
     border: none;
-    border-radius: var(--radius-lg);
+    border-radius: 50%;
     font: inherit;
     font-size: 18px;
     font-weight: 700;
@@ -317,17 +330,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 0 0 rgba(0, 202, 255, 0);
+    box-shadow: 0 6px 16px var(--accent-glow);
   }
   #send:hover:not(:disabled) {
-    background: #33d6ff;
-    box-shadow: 0 0 24px var(--accent-glow);
+    background: var(--accent-dim);
+    transform: translateY(-1px);
   }
   #send:active:not(:disabled) { transform: scale(0.96); }
-  #send:disabled { opacity: 0.35; cursor: not-allowed; }
+  #send:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 
   /* ---------------------------------------------------------------------
-     Sidebar
+     Right sidebar — goals
      --------------------------------------------------------------------- */
 
   #sidebar {
@@ -336,36 +349,23 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-2);
-    border-left: 1px solid rgba(255, 255, 255, 0.04);
+    border-left: 1px solid var(--border);
     overflow: hidden;
   }
 
   #sidebar header {
-    padding: 20px 22px 14px;
+    padding: 20px 24px 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-  #sidebar header .section-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  #sidebar header .section-head .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-glow);
-    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-2);
   }
   #sidebar header h1 {
-    font-size: 12px;
+    font-size: 15px;
     margin: 0;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-mute);
+    color: var(--text);
+    letter-spacing: -0.01em;
   }
   #refresh {
     background: transparent;
@@ -381,37 +381,68 @@
   #refresh:hover:not(:disabled) { color: var(--accent); }
   #refresh:disabled { opacity: 0.4; cursor: wait; }
 
-  #goals { flex: 1 1 auto; overflow-y: auto; padding: 6px 16px 20px; }
+  #goals { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px 20px; }
 
   .goal {
     background: var(--surface);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
     padding: 16px 18px;
     margin-bottom: 12px;
     box-shadow: var(--shadow-sm);
     transition: all 0.15s ease;
-    cursor: default;
   }
   .goal:hover {
-    background: var(--surface-2);
+    border-color: var(--accent-soft);
     box-shadow: var(--shadow-md);
     transform: translateY(-1px);
   }
+
+  .goal .top {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .goal .glyph {
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .goal .glyph.type-1 { background: rgba(232, 162, 60, 0.14); color: #c07e1a; }
+  .goal .glyph.type-2 { background: rgba(34, 181, 115, 0.14); color: #1a8a56; }
+  .goal .glyph.type-3 { background: rgba(91, 91, 255, 0.12); color: #4a4acc; }
+  .goal .glyph.type-4 { background: rgba(232, 96, 108, 0.14); color: #c04a58; }
+  .goal .glyph.type-5 { background: rgba(120, 90, 220, 0.14); color: #6846c8; }
+
+  .goal .head {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .goal h2 {
-    font-size: 15px;
-    margin: 0 0 4px 0;
+    font-size: 14.5px;
+    margin: 0 0 2px 0;
     font-weight: 600;
     color: var(--text);
     letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .goal .meta {
     font-size: 12px;
-    color: var(--text-dim);
-    margin-bottom: 12px;
-    line-height: 1.5;
+    color: var(--text-mute);
+    line-height: 1.4;
   }
 
-  /* Compact progress line at the top of each card */
   .goal .progress {
     display: flex;
     align-items: center;
@@ -420,8 +451,8 @@
   }
   .goal .progress .bar {
     flex: 1 1 auto;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.06);
+    height: 4px;
+    background: var(--bg-3);
     border-radius: var(--radius-pill);
     overflow: hidden;
   }
@@ -430,14 +461,14 @@
     background: var(--accent);
     border-radius: var(--radius-pill);
     transition: width 0.3s ease;
-    box-shadow: 0 0 8px var(--accent-glow);
   }
   .goal .progress .count {
     font-size: 11px;
     color: var(--text-dim);
-    letter-spacing: 0.02em;
-    min-width: 40px;
+    letter-spacing: 0.01em;
+    min-width: 70px;
     text-align: right;
+    font-weight: 500;
   }
 
   .items { list-style: none; padding: 0; margin: 0; }
@@ -446,14 +477,16 @@
     gap: 10px;
     align-items: flex-start;
     padding: 6px 0;
-    font-size: 13.5px;
+    font-size: 13px;
     line-height: 1.5;
+    border-top: 1px solid var(--border-2);
   }
+  .items li:first-child { border-top: none; }
   .items li .icon {
     flex: 0 0 18px;
     font-size: 13px;
     line-height: 1.5;
-    opacity: 0.9;
+    color: var(--text-mute);
   }
   .items li .body { flex: 1 1 auto; min-width: 0; }
   .items li .label { color: var(--text); }
@@ -468,29 +501,38 @@
     font-size: 10.5px;
     padding: 2px 8px;
     border-radius: var(--radius-pill);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-3);
     color: var(--text-dim);
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
   }
   .items li .sub .badge.accent {
     background: var(--accent-soft);
     color: var(--accent);
   }
+  .items li .sub .badge.ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .items li .sub .badge.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
 
   .items li.done .label {
     color: var(--text-mute);
     text-decoration: line-through;
-    text-decoration-color: rgba(255, 255, 255, 0.15);
+    text-decoration-color: rgba(15, 18, 34, 0.2);
   }
+  .items li.done .icon { color: var(--ok); }
 
   /* ---------------------------------------------------------------------
-     Time travel / demo panel — subtle footer
+     Time travel / demo panel
      --------------------------------------------------------------------- */
 
   #demo {
     padding: 14px 20px 18px;
     background: var(--bg-3);
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--border-2);
   }
   #demo .label {
     font-size: 10px;
@@ -506,9 +548,9 @@
     flex-wrap: wrap;
   }
   #demo button {
-    background: transparent;
+    background: var(--bg-2);
     color: var(--text-dim);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: var(--radius-pill);
     padding: 5px 12px;
     font: inherit;
@@ -518,8 +560,8 @@
   }
   #demo button:hover:not(:disabled) {
     color: var(--accent);
-    border-color: rgba(0, 202, 255, 0.4);
-    background: var(--accent-soft);
+    border-color: var(--accent-soft);
+    background: var(--bg-2);
   }
   #demo button:disabled { opacity: 0.4; cursor: wait; }
   #demo button#reset-clock { margin-left: auto; }
@@ -529,7 +571,7 @@
     margin-top: 8px;
     letter-spacing: 0.02em;
   }
-  #demo .clock.sim { color: var(--accent); }
+  #demo .clock.sim { color: var(--accent); font-weight: 600; }
 
   /* ---------------------------------------------------------------------
      Empty & skeleton states
@@ -545,23 +587,24 @@
   .empty strong {
     display: block;
     color: var(--text-dim);
-    font-weight: 500;
+    font-weight: 600;
     margin-bottom: 4px;
   }
 
-  .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; padding: 4px; }
+  .skeleton-wrap { display: flex; flex-direction: column; gap: 12px; }
   .skeleton-card {
     background: var(--surface);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
     padding: 16px;
   }
   .skeleton-line {
     height: 10px;
     background: linear-gradient(
       90deg,
-      rgba(255, 255, 255, 0.04) 0%,
-      rgba(0, 202, 255, 0.06) 50%,
-      rgba(255, 255, 255, 0.04) 100%
+      var(--bg-3) 0%,
+      var(--accent-softer) 50%,
+      var(--bg-3) 100%
     );
     background-size: 200% 100%;
     animation: skeleton-shimmer 1.6s ease-in-out infinite;
@@ -580,12 +623,19 @@
 </head>
 <body>
 <div id="app">
+
   <section id="chat">
-    <div id="brand">
-      <span class="dot" aria-hidden="true"></span>
-      <span class="mark">Onward</span>
-      <span class="tag">for the things that depend on other people</span>
-    </div>
+    <header>
+      <div>
+        <div class="title">Onward</div>
+        <div class="subtitle">for the things that depend on other people</div>
+      </div>
+      <div class="status">
+        <span class="dot" aria-hidden="true"></span>
+        <span>online</span>
+      </div>
+    </header>
+
     <div id="flag-banner">
       <div class="body">
         <div class="title" id="flag-title">Heads up</div>
@@ -595,11 +645,16 @@
         <button type="button" id="flag-dismiss">Dismiss</button>
       </div>
     </div>
+
     <div id="messages">
-      <div class="msg sys intro">
-        Hi! I'm Onward. Tell me what you're trying to get done, and when it's due. I'll help you keep track of what's needed, what's still pending, and what needs your attention — so nothing important slips through the cracks.
+      <div class="row sys intro">
+        <div class="avatar">O</div>
+        <div class="bubble">
+          Hi! I'm Onward. Tell me what you're trying to get done, and when it's due. I'll help you keep track of what's needed, what's still pending, and what needs your attention — so nothing important slips through the cracks.
+        </div>
       </div>
     </div>
+
     <form id="composer">
       <textarea id="input" rows="1" placeholder="Tell me what you're working toward…"></textarea>
       <button id="send" type="submit" aria-label="Send">↑</button>
@@ -608,10 +663,7 @@
 
   <aside id="sidebar">
     <header>
-      <div class="section-head">
-        <span class="dot" aria-hidden="true"></span>
-        <h1>Your goals</h1>
-      </div>
+      <h1>Your goals</h1>
       <button id="refresh" type="button">Refresh</button>
     </header>
     <div id="goals">
@@ -642,11 +694,12 @@
       <div class="clock" id="clock">Clock: real time</div>
     </div>
   </aside>
+
 </div>
 
 <script>
 const MCP_URL = '/mcp';
-const MCP_TIMEOUT_MS = 30_000;
+const MCP_TIMEOUT_MS = 45_000;
 
 async function mcpCall(toolName, args = {}) {
   const controller = new AbortController();
@@ -680,6 +733,14 @@ async function advanceDays(n) {
 async function resetClock() {
   const res = await fetch('/demo/reset', { method: 'POST' });
   if (!res.ok) throw new Error(`reset HTTP ${res.status}`);
+  return res.json();
+}
+
+// Read-only: reports the clock without moving it, so the display can be
+// re-synced on page load without side effects.
+async function fetchClockState() {
+  const res = await fetch('/demo/clock-state', { method: 'GET' });
+  if (!res.ok) throw new Error(`clock-state HTTP ${res.status}`);
   return res.json();
 }
 
@@ -730,28 +791,45 @@ $flagDismiss.addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 
 function addMessage(kind, text, meta) {
-  const div = document.createElement('div');
-  div.className = `msg ${kind}`;
-  div.textContent = text;
+  const row = document.createElement('div');
+  row.className = `row ${kind}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = kind === 'user' ? '·' : 'O';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
   if (meta) {
     const m = document.createElement('div');
     m.className = 'meta';
     m.textContent = meta;
-    div.appendChild(m);
+    bubble.appendChild(m);
   }
-  $messages.appendChild(div);
+
+  if (kind === 'user') {
+    row.appendChild(bubble);
+    row.appendChild(avatar);
+  } else {
+    row.appendChild(avatar);
+    row.appendChild(bubble);
+  }
+
+  $messages.appendChild(row);
   $messages.scrollTop = $messages.scrollHeight;
-  return div;
+  return row;
 }
 
-function resolvePending(pendingEl, kind, text, meta) {
-  pendingEl.className = `msg ${kind}`;
-  pendingEl.textContent = text;
+function resolvePending(rowEl, kind, text, meta) {
+  rowEl.className = `row ${kind}`;
+  const bubble = rowEl.querySelector('.bubble');
+  bubble.textContent = text;
   if (meta) {
     const m = document.createElement('div');
     m.className = 'meta';
     m.textContent = meta;
-    pendingEl.appendChild(m);
+    bubble.appendChild(m);
   }
   $messages.scrollTop = $messages.scrollHeight;
 }
@@ -788,7 +866,13 @@ $composer.addEventListener('submit', async (e) => {
   const pending = addMessage('thinking', 'Thinking');
 
   try {
-    const response = await mcpCall('report_statement', { text });
+    const response = await sendStatementWithRetry(text);
+
+    if (response && response.__retried) {
+      // The retry succeeded — the bubble has already been updated to
+      // "retrying..." by sendStatementWithRetry. Just replace its text.
+    }
+
     const message = response?.message ?? '(no message)';
     resolvePending(pending, 'sys', message, null);
 
@@ -796,18 +880,56 @@ $composer.addEventListener('submit', async (e) => {
       showFlagBanner(response.proactive_flag);
     }
 
+    // Fire-and-forget sidebar refresh. Do not block on this.
     const touchedGoalId = pickTouchedGoalId(response);
-    if (touchedGoalId) await refreshOneGoal(touchedGoalId);
-    else await refreshSidebar();
+    if (touchedGoalId) {
+      refreshOneGoal(touchedGoalId).catch(() => {});
+    } else {
+      refreshSidebar().catch(() => {});
+    }
   } catch (err) {
     const isAbort = err.name === 'AbortError';
     resolvePending(pending, 'error',
       isAbort ? 'That took too long. Try again.' : `Something went wrong: ${err.message}`);
   } finally {
+    // Re-enable the input immediately. Sidebar refresh runs in parallel.
     $send.disabled = false;
     $input.focus();
   }
 });
+
+/**
+ * Send one message to /mcp. If the server says the error is retryable
+ * (data.retryable === true), resend the same text once. On the retry,
+ * update the bubble text to "retrying...". If the retry also fails,
+ * throw the second error so the caller shows the failure message.
+ *
+ * The returned object is the successful response, with __retried: true
+ * set if this was the retry that succeeded.
+ */
+async function sendStatementWithRetry(text) {
+  let first;
+  try {
+    first = await mcpCall('report_statement', { text });
+  } catch (e) {
+    throw e;
+  }
+
+  if (first && first.data && first.data.retryable === true) {
+    // Show retrying state on the pending bubble.
+    const bubbles = $messages.querySelectorAll('.row.thinking .bubble');
+    const lastThinking = bubbles[bubbles.length - 1];
+    if (lastThinking) lastThinking.textContent = 'retrying...';
+
+    const second = await mcpCall('report_statement', { text });
+    if (second && typeof second === 'object') {
+      second.__retried = true;
+    }
+    return second;
+  }
+
+  return first;
+}
 
 $input.addEventListener('input', () => {
   $input.style.height = 'auto';
@@ -876,23 +998,62 @@ function pickTouchedGoalId(response) {
 
 function cssEscape(s) { return String(s).replace(/["\\]/g, '\\$&'); }
 
+function hashType(t) {
+  if (!t) return 0;
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+  return Math.abs(h) % 5 + 1;
+}
+
+function typeGlyph(t) {
+  if (!t) return '◎';
+  const map = {
+    grad_scholarship_application: '◆',
+    visa_permit_application: '🛂',
+    job_application_with_references: '★',
+    grant_application: '✦',
+    signed_form_return: '✎',
+    school_enrollment: '⌂',
+    camp_registration: '☀',
+    doctor_appointment_paperwork: '✚',
+    lease_signing: '⌘',
+    tax_filing: '§',
+  };
+  return map[t] || '◎';
+}
+
 function renderGoalCard(detail) {
   const { goal, requirements } = detail;
   const card = document.createElement('div');
   card.className = 'goal';
   card.dataset.goalId = goal.id;
 
+  const typeClass = `type-${hashType(goal.goal_type)}`;
+
+  const top = document.createElement('div');
+  top.className = 'top';
+
+  const glyph = document.createElement('div');
+  glyph.className = `glyph ${typeClass}`;
+  glyph.textContent = typeGlyph(goal.goal_type);
+  top.appendChild(glyph);
+
+  const head = document.createElement('div');
+  head.className = 'head';
+
   const h2 = document.createElement('h2');
   h2.textContent = goal.title;
-  card.appendChild(h2);
+  head.appendChild(h2);
 
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `due ${goal.deadline}`;
+  meta.textContent = `Due ${goal.deadline}`;
   if (goal.goal_type) meta.textContent += ` · ${prettyType(goal.goal_type)}`;
-  card.appendChild(meta);
+  head.appendChild(meta);
 
-  // Progress bar
+  top.appendChild(head);
+  card.appendChild(top);
+
   const total = requirements.length;
   const done = requirements.filter((r) => r.status === 'done').length;
   const progress = document.createElement('div');
@@ -906,7 +1067,7 @@ function renderGoalCard(detail) {
   progress.appendChild(bar);
   const count = document.createElement('div');
   count.className = 'count';
-  count.textContent = `${done}/${total}`;
+  count.textContent = `${done} of ${total} completed`;
   progress.appendChild(count);
   card.appendChild(progress);
 
@@ -937,16 +1098,17 @@ function renderItem(r) {
   body.appendChild(label);
 
   const badges = [];
-  if (r.depends_on) badges.push({ text: r.depends_on, accent: r.status === 'waiting_on_other' });
+  if (r.depends_on) badges.push({ text: r.depends_on, cls: r.status === 'waiting_on_other' ? 'accent' : '' });
   if (r.requested_at) badges.push({ text: `requested ${String(r.requested_at).slice(0, 10)}` });
-  if (r.status === 'done' && r.received_at) badges.push({ text: `received ${String(r.received_at).slice(0, 10)}` });
+  if (r.status === 'done' && r.received_at) badges.push({ text: `received ${String(r.received_at).slice(0, 10)}`, cls: 'ok' });
+  if (r.status === 'waiting_on_other' && !r.requested_at) badges.push({ text: 'waiting', cls: 'warn' });
 
   if (badges.length) {
     const sub = document.createElement('div');
     sub.className = 'sub';
     for (const b of badges) {
       const span = document.createElement('span');
-      span.className = 'badge' + (b.accent ? ' accent' : '');
+      span.className = 'badge' + (b.cls ? ' ' + b.cls : '');
       span.textContent = b.text;
       sub.appendChild(span);
     }
@@ -991,11 +1153,12 @@ document.querySelectorAll('#demo [data-advance]').forEach((btn) => {
     try {
       const result = await advanceDays(days);
       updateClockLabel(result);
-      addMessage('sys', `Time advanced to ${result.now.slice(0, 10)}.`, 'time travel');
+      // Clock events update only the clock/status panel. Nothing goes
+      // into the chat transcript.
       if (result.proactive_message) {
         showFlagBanner({ goal_title: null, message: result.proactive_message });
       }
-      await refreshSidebar();
+      refreshSidebar().catch(() => {});
     } catch (err) {
       addMessage('error', `Couldn't advance time: ${err.message}`);
     } finally { setDemoButtonsDisabled(false); }
@@ -1008,8 +1171,7 @@ if ($resetBtn) {
     try {
       const result = await resetClock();
       updateClockLabel(result);
-      addMessage('sys', `Clock reset to real time (${result.now.slice(0, 10)}).`, 'time travel');
-      await refreshSidebar();
+      refreshSidebar().catch(() => {});
     } catch (err) { addMessage('error', `Couldn't reset the clock: ${err.message}`); }
     finally { setDemoButtonsDisabled(false); }
   });
@@ -1026,8 +1188,20 @@ async function loadInitialFlag() {
   } catch { /* ignore */ }
 }
 
+// The clock lives only in server memory (see services/clock.js) — a page
+// refresh never moves it — but until now nothing on load ever asked the
+// server what it was currently at, so the label just sat on its hardcoded
+// "Clock: real time" markup regardless of how far time had been advanced.
+async function loadInitialClock() {
+  try {
+    const result = await fetchClockState();
+    updateClockLabel(result);
+  } catch { /* leave the default label if this fails */ }
+}
+
 refreshSidebar();
 loadInitialFlag();
+loadInitialClock();
 $input.focus();
 </script>
 </body>

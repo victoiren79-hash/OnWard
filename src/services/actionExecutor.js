@@ -282,6 +282,7 @@ Return ONLY the message body.
       ? `Requested ${daysSinceRequest} day${daysSinceRequest === 1 ? '' : 's'} ago`
       : null,
     opts.tone ? `Tone: ${opts.tone}` : null,
+    goal?.context ? `\nContext: ${goal.context}` : null,
   ]
     .filter(Boolean)
     .join('\n');

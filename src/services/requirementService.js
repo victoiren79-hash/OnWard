@@ -18,6 +18,28 @@ export const STATUSES = Object.freeze([
 export const KINDS = Object.freeze(['self_action', 'external_dependency']);
 
 // ---------------------------------------------------------------------------
+// Kind normalization
+//
+// The LLM is not reliable about the exact spelling of "kind". It sends
+// variants like "self", "self action", "Self-Action", "external",
+// "third party", "dependency". This maps any of them to the two values
+// the database accepts. Returns null when the input is unusable, so the
+// caller can decide the fallback.
+// ---------------------------------------------------------------------------
+
+export function normalizeKind(raw) {
+  if (typeof raw !== 'string') return null;
+  const k = raw.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (k === 'self_action' ||
+      ['self', 'me', 'task', 'own', 'self_task', 'my_action'].includes(k))
+    return 'self_action';
+  if (k === 'external_dependency' ||
+      ['external', 'other', 'others', 'third_party', 'dependency',
+       'external_dep', 'external_action'].includes(k)) return 'external_dependency';
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Transition matrix
 // ---------------------------------------------------------------------------
 

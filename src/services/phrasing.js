@@ -1,7 +1,8 @@
 // Onward — natural-language phrasing over deterministic data.
 //
-// Five functions:
+// Exports:
 //   - phraseSuggestion(goal, essentials, helpful, opts)  → { text, items_mentioned }
+//   - phraseBatchSuggestion(entries, opts)               → { text, per_goal }
 //   - phraseCompletenessQuestion(missingItems)           → retained for
 //                                                          compatibility
 //   - phraseReport(reportData)                           → prose over a
@@ -14,6 +15,9 @@ import { callLLM, callLLMText } from '../llm.js';
 
 // ---------------------------------------------------------------------------
 // phraseSuggestion
+//
+// A single goal was just created. Write the message that comes right
+// after. It should read like a competent colleague, not a form.
 // ---------------------------------------------------------------------------
 
 export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
@@ -26,68 +30,49 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
   }
 
   const systemPrompt = [
-    'You are Onward, an assistant for deadline-bound goals. The user just',
-    'told you about a new goal. You are writing the message that comes',
-    'right after the acknowledgement.',
+    'You are Onward. The user just told you about a new goal.',
     '',
-    'Your job: help the user think of what this goal needs, without',
-    'sounding like a form. You are a calm, competent person who has seen',
-    'this kind of goal before. You notice things. You ask about them once',
-    'and move on.',
+    'You are a calm, competent colleague who has seen this kind of goal',
+    'before. You notice things. You raise them once, briefly, then stop.',
     '',
     'You are given:',
     '  - The goal title, goal type, and deadline.',
-    '  - ESSENTIALS: items that MUST appear in your message. Every one of',
-    '    them. These are the items without which the goal cannot succeed.',
+    '  - ESSENTIALS: items that MUST appear in your message, all of them.',
+    '    Use their labels verbatim.',
     '  - HELPFUL: a pool of items that matter for SOME versions of this',
-    '    goal. Pick ZERO, ONE, or TWO of them — whichever fit the goal as',
-    '    described. Do not pick all of them. Do not pick arbitrarily. Pick',
-    '    the ones a thoughtful person would raise given the specific goal.',
-    '  - Optionally, what the user originally said when creating the goal.',
+    '    goal. Pick at most one to raise. Do not raise two unless they are',
+    '    obviously both needed. Do not raise any if none fit.',
+    '  - Optionally, what the user originally said.',
     '',
-    'RULES FOR THE PROSE:',
-    '- Write ONE short message, 2 to 4 sentences.',
-    '- You MUST name every item in ESSENTIALS. Do not skip any. Do not',
-    '  rename them. Use their labels verbatim.',
-    '- Weave the essentials in naturally. Do not write a bulleted list.',
-    '- If helpful items are worth raising, mention one or two. Use their',
-    '  labels verbatim.',
-    '- Do NOT invent items not in ESSENTIALS or HELPFUL.',
-    '- Vary your opening. Do not always start with "Got it" or "For this',
-    '  goal". Rotate between: a factual note, a question, a mild',
-    '  observation, a concrete next step.',
+    'Write one short paragraph, 2 to 3 sentences. Then one closing',
+    'question or invitation, on its own line.',
     '',
-    '- ENDING. The ONLY two things you may invite the user to do are:',
-    '    1. Tell you which of the named items they already have.',
-    '    2. Say yes to adding the named items to their checklist.',
-    '  Your closing question must map cleanly onto one of those two.',
-    '  Good endings:',
-    '    "Which of those do you already have?"',
-    '    "Want me to add those to your checklist?"',
-    '    "Tell me what you already have and I\'ll fill in the rest."',
-    '  Bad endings — never write anything like these:',
-    '    "Would you like me to outline a timeline?"',
-    '    "Do you want help planning the next steps?"',
-    '    "Shall I map out a schedule?"',
-    '    "Want me to draft a plan?"',
-    '  The system cannot plan, outline, schedule, or draft. Do not',
-    '  promise capabilities it does not have.',
+    'RULES:',
+    '- Name every ESSENTIAL item, verbatim, woven into a sentence. Do not',
+    '  use bullet points.',
+    '- Mention at most one HELPFUL item, and only if it fits this specific',
+    '  goal. If you mention it, its label must appear in items_mentioned.',
+    '- Do not invent items.',
+    '- Do not use em-dashes or exclamation marks.',
+    '- Do not promise capabilities you do not have. You cannot plan,',
+    '  schedule, outline, or draft. Do not offer to.',
+    '- Do not open with "Got it", "For this goal", "Noted", or "Understood".',
+    '  Open with an observation, a question, or a concrete next step.',
+    '- The closing must invite exactly one of:',
+    '    (a) telling you which of the named items the user already has,',
+    '    (b) saying yes to adding the named items to the checklist.',
+    '  Pick whichever fits the tone you wrote. Vary between runs.',
     '',
-    '- Do not use em-dashes. Do not use exclamation marks.',
-    '- Keep the tone warm but not effusive.',
+    'Write 40 to 80 words of prose in "text". No bullets. No headers.',
     '',
     'RULES FOR items_mentioned:',
-    '- This array must contain EVERY item label that appears anywhere in',
-    '  the prose you write. Every one.',
-    '- If you mention it in the prose, it must be in items_mentioned. If',
-    '  you do not mention it in the prose, it must NOT be in',
-    '  items_mentioned.',
-    '- The essentials are always named, so they are always in the list.',
-    '- If you named a helpful item in the prose, that helpful item must',
-    '  also be in the list.',
-    '- Use the labels verbatim from the input. Do not paraphrase.',
+    '- It contains EXACTLY the item labels that appear in your prose, one',
+    '  entry per label, verbatim from the input. Every essential is always',
+    '  in here because every essential appears in the prose.',
+    '- If a helpful item appears in the prose, it is in here too.',
+    '- If you did not mention a helpful item, it is NOT in here.',
     '',
-    'Return a JSON object with this exact shape:',
+    'Return ONLY this JSON object:',
     '{',
     '  "text": string,',
     '  "items_mentioned": [ string ]',
@@ -112,7 +97,7 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
       ? essentialsList.map((e) => `  - ${e.label} (${e.kind})`).join('\n')
       : '  (none)',
     '',
-    'HELPFUL (pick 0-2 to mention; if mentioned, add to items_mentioned):',
+    'HELPFUL (raise at most one; if named, add to items_mentioned):',
     helpfulList.length > 0
       ? helpfulList.map((h) => `  - ${h.label} (${h.kind})`).join('\n')
       : '  (none)',
@@ -173,44 +158,290 @@ export async function phraseSuggestion(goal, essentials, helpful, opts = {}) {
   return { text, items_mentioned: finalMentioned };
 }
 
-function fallbackSuggestionResult(goal, essentials, helpful) {
-  const parts = [];
-  const mentioned = [];
+// ---------------------------------------------------------------------------
+// phraseBatchSuggestion
+//
+// Several goals were created in one turn. Write ONE warm intro paragraph
+// plus one short line per goal. The result should read like a person
+// handing back a plan, not a system printing receipts.
+//
+// entries: [ { goal, essentials: [...], helpful: [...] }, ... ]
+// opts:    { userStatedGoal?, daysUntilByGoal? }
+//
+// Returns: { text: string, per_goal: [ { goal_id, line, items_mentioned } ] }
+// ---------------------------------------------------------------------------
 
-  if (essentials.length > 0) {
-    const labels = essentials.map((e) => e.label).join(', ');
-    parts.push(`The essentials for this one are ${labels}.`);
-    for (const e of essentials) mentioned.push(e.label);
+export async function phraseBatchSuggestion(entries, opts = {}) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) {
+    return { text: '', per_goal: [] };
   }
-  if (helpful.length > 0) {
-    const pick = helpful[0];
-    parts.push(`You might also want ${pick.label}.`);
-    mentioned.push(pick.label);
+
+  // If there's only one, defer to the single-goal writer for a cleaner
+  // prompt.
+  if (list.length === 1) {
+    const e = list[0];
+    const single = await phraseSuggestion(e.goal, e.essentials, e.helpful, {
+      userStatedGoal: opts.userStatedGoal,
+      daysUntilDeadline: e.daysUntilDeadline,
+    });
+    return {
+      text: single.text,
+      per_goal: [
+        {
+          goal_id: e.goal?.id ?? null,
+          line: single.text,
+          items_mentioned: single.items_mentioned,
+        },
+      ],
+    };
   }
-  if (parts.length === 0) {
-    parts.push(`Nothing else obvious to add. Anything you want me to track?`);
+
+  const systemPrompt = [
+    'You are Onward. The user just described several goals in one message.',
+    'You are going to hand them back in a single, calm reply.',
+    '',
+    'Read all the goals. Find the shape of their day or week. Then write:',
+    '',
+    '  1. One opening paragraph. 1 to 2 sentences. It sets the frame: how',
+    '     many things, and what unites or separates them (different days,',
+    '     different kinds of urgency, one is quick and one is long).',
+    '     No "Got it". No "Here you go". No bullets in the opening.',
+    '',
+    '  2. One short line per goal. Each line names the goal, its deadline',
+    '     in plain words ("tomorrow", "today", "in five days"), and the',
+    '     essentials for that goal, woven into a sentence. If a helpful',
+    '     item fits, raise ONE. Do not use bullet points or numbers.',
+    '     Keep each line to one sentence, under 40 words.',
+    '',
+    'RULES:',
+    '- Do not use em-dashes or exclamation marks.',
+    '- Do not promise capabilities you do not have.',
+    '- Do not offer to plan, schedule, or outline.',
+    '- Use item labels verbatim from the input.',
+    '- Do not mention any item that is not in the input for that goal.',
+    '- Second person throughout.',
+    '- Vary your opening. Do not always start with "Three things" or',
+    '  "Alright". Sometimes start with an observation about the shape.',
+    '',
+    'Return ONLY this JSON object:',
+    '{',
+    '  "text": string,',
+    '  "per_goal": [',
+    '    {',
+    '      "goal_id": string,',
+    '      "line": string,',
+    '      "items_mentioned": [ string ]',
+    '    }',
+    '  ]',
+    '}',
+    '',
+    'One entry in per_goal, in the same order as the goals below. Every',
+    'essential item for that goal must appear in its "line" and in its',
+    '"items_mentioned". No prose outside the JSON.',
+  ].join('\n');
+
+  const goalBlocks = list.map((e, i) => {
+    const essentials = Array.isArray(e.essentials) ? e.essentials : [];
+    const helpful = Array.isArray(e.helpful) ? e.helpful : [];
+    const lines = [
+      `Goal ${i + 1}:`,
+      `  id: ${e.goal?.id ?? '(unknown)'}`,
+      `  title: ${JSON.stringify(e.goal?.title ?? '')}`,
+      e.goal?.goal_type ? `  goal_type: ${e.goal.goal_type}` : null,
+      e.goal?.deadline ? `  deadline: ${isoDate(e.goal.deadline)}` : null,
+      e.daysUntilDeadline != null
+        ? `  days_until_deadline: ${e.daysUntilDeadline}`
+        : null,
+      '  ESSENTIALS (must appear verbatim in this goal\'s line):',
+      essentials.length > 0
+        ? essentials.map((x) => `    - ${x.label} (${x.kind})`).join('\n')
+        : '    (none)',
+      '  HELPFUL (raise at most one):',
+      helpful.length > 0
+        ? helpful.map((x) => `    - ${x.label} (${x.kind})`).join('\n')
+        : '    (none)',
+    ].filter(Boolean);
+    return lines.join('\n');
+  });
+
+  const userMessage = [
+    opts.userStatedGoal
+      ? `Original user message:\n${JSON.stringify(opts.userStatedGoal)}`
+      : null,
+    '',
+    'Goals, in order:',
+    '',
+    goalBlocks.join('\n\n'),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  let raw;
+  try {
+    raw = await callLLM(systemPrompt, userMessage, { temperature: 0.7 });
+  } catch (e) {
+    console.warn('[onward/phrasing] phraseBatchSuggestion LLM call failed:', e.message);
+    return fallbackBatchSuggestionResult(list);
+  }
+
+  if (!raw || typeof raw !== 'object' || typeof raw.text !== 'string' || !raw.text.trim()) {
+    return fallbackBatchSuggestionResult(list);
+  }
+
+  const text = raw.text.trim();
+  const perGoalRaw = Array.isArray(raw.per_goal) ? raw.per_goal : [];
+  const byGoalId = new Map();
+  for (const entry of perGoalRaw) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (typeof entry.goal_id !== 'string') continue;
+    if (typeof entry.line !== 'string' || !entry.line.trim()) continue;
+    if (!byGoalId.has(entry.goal_id)) {
+      byGoalId.set(entry.goal_id, {
+        line: entry.line.trim(),
+        items_mentioned: Array.isArray(entry.items_mentioned)
+          ? entry.items_mentioned.filter((x) => typeof x === 'string' && x.trim())
+          : [],
+      });
+    }
+  }
+
+  const perGoal = list.map((e) => {
+    const goalId = e.goal?.id ?? null;
+    const found = goalId ? byGoalId.get(goalId) : null;
+    if (found) {
+      // Sanitize mentioned to the valid set for this goal.
+      const valid = new Set([
+        ...(e.essentials ?? []).map((x) => x.label),
+        ...(e.helpful ?? []).map((x) => x.label),
+      ]);
+      const seen = new Set();
+      const mentioned = [];
+      for (const m of found.items_mentioned) {
+        if (valid.has(m) && !seen.has(m)) { mentioned.push(m); seen.add(m); }
+      }
+      const lineLower = found.line.toLowerCase();
+      for (const label of valid) {
+        if (seen.has(label)) continue;
+        if (lineLower.includes(label.toLowerCase())) {
+          mentioned.push(label);
+          seen.add(label);
+        }
+      }
+      for (const ess of e.essentials ?? []) {
+        if (!seen.has(ess.label)) { mentioned.push(ess.label); seen.add(ess.label); }
+      }
+      return { goal_id: goalId, line: found.line, items_mentioned: mentioned };
+    }
+    return fallbackSingleLineEntry(e);
+  });
+
+  return { text, per_goal: perGoal };
+}
+
+function fallbackSingleLineEntry(e) {
+  const essentials = Array.isArray(e.essentials) ? e.essentials : [];
+  const helpful = Array.isArray(e.helpful) ? e.helpful : [];
+  const title = e.goal?.title ?? 'this goal';
+  const deadline = e.goal?.deadline ? shortDeadline(e.goal.deadline) : '';
+  const items = essentials.map((x) => x.label);
+  const mentioned = [...items];
+
+  let line = `${title}${deadline ? `, due ${deadline}` : ''}.`;
+  if (items.length > 0) {
+    line += ` You'll need ${joinWithAnd(items)}.`;
+  } else if (helpful.length > 0) {
+    line += ` Might be worth adding ${helpful[0].label}.`;
+    mentioned.push(helpful[0].label);
   } else {
-    parts.push(`Tell me which of those you already have, or add anything else.`);
+    line += ` Nothing standard to add.`;
   }
 
-  return { text: parts.join(' '), items_mentioned: mentioned };
+  return { goal_id: e.goal?.id ?? null, line, items_mentioned: mentioned };
+}
+
+function fallbackBatchSuggestionResult(list) {
+  const goalLines = list.map(fallbackSingleLineEntry);
+  const count = list.length;
+  const intro = count === 1
+    ? 'One thing, then.'
+    : count === 2
+      ? 'Two things, then.'
+      : count === 3
+        ? 'Three things, then.'
+        : `A few things, then.`;
+
+  return {
+    text: intro,
+    per_goal: goalLines,
+  };
+}
+
+function shortDeadline(deadline) {
+  const d = new Date(deadline);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const a = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const n = Math.round((b - a) / (24 * 60 * 60 * 1000));
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n > 1 && n <= 7) return `in ${n} days`;
+  return `on ${isoDate(deadline)}`;
+}
+
+function joinWithAnd(items) {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  const last = items[items.length - 1];
+  return `${items.slice(0, -1).join(', ')}, and ${last}`;
 }
 
 // ---------------------------------------------------------------------------
-// phraseEmptySuggestion
+// fallbackSuggestionResult — used only if the LLM fails for phraseSuggestion
+// ---------------------------------------------------------------------------
+
+function fallbackSuggestionResult(goal, essentials, helpful) {
+  const mentioned = [];
+  const bits = [];
+
+  if (essentials.length > 0) {
+    const items = essentials.map((e) => e.label);
+    bits.push(`The usual essentials here are ${joinWithAnd(items)}.`);
+    for (const label of items) mentioned.push(label);
+  }
+  if (helpful.length > 0 && essentials.length === 0) {
+    const pick = helpful[0];
+    bits.push(`You might also want ${pick.label}.`);
+    mentioned.push(pick.label);
+  }
+
+  if (bits.length === 0) {
+    bits.push(`Nothing standard I'd add here.`);
+  }
+
+  bits.push(`Tell me which of those you already have, or add anything else.`);
+
+  return { text: bits.join(' '), items_mentioned: mentioned };
+}
+
+// ---------------------------------------------------------------------------
+// phraseEmptySuggestion — nothing standard is missing
 // ---------------------------------------------------------------------------
 
 async function phraseEmptySuggestion(goal, opts = {}) {
   const systemPrompt = [
-    'You are Onward. The user just told you about a goal that already has',
-    'all the usual items. Nothing is missing.',
+    'You are Onward. The user just told you about a goal that has all',
+    'the usual items already.',
     '',
     'Write ONE short sentence that:',
-    '  - acknowledges the goal is set up',
+    '  - acknowledges the goal is set up, without sounding canned',
     '  - invites the user to add anything they think of',
-    '  - varies its phrasing — do not use the same opening every time',
+    '  - varies its phrasing between runs',
     '',
-    'Return plain text only. No JSON, no quotes.',
+    'Do not use em-dashes or exclamation marks. Do not promise to plan,',
+    'schedule, or draft. Return plain text only.',
   ].join('\n');
 
   const userMessage = [
@@ -343,10 +574,7 @@ export async function phraseReport(reportData) {
 // phraseProactiveMessage
 //
 // The reminder message. Facts are computed deterministically upstream.
-// The caller passes the moment kind that fired so the message can lead
-// with the right framing: a request_by leads with "you need to send the
-// request by <date>", a seven_days_out leads with "one week left", and
-// so on.
+// The caller passes the moment kind that fired.
 //
 // Throws on LLM failure so the caller can fall back to the deterministic
 // composer.
@@ -358,78 +586,55 @@ export async function phraseProactiveMessage(facts, momentKind = null) {
   }
 
   const rootKind = momentKind ? String(momentKind).split(':')[0] : null;
-
   const framing = buildFramingForKind(rootKind);
 
   const systemPrompt = [
-    'You are Onward, writing a short status note about a goal with a',
-    'deadline. The user is busy. Read the facts and write them back in',
-    'plain, natural language — as a person would, not as a form.',
+    'You are Onward. You text a busy person one quick heads-up about',
+    'something with a deadline. Picture them glancing at their phone',
+    'mid-task (cooking, driving, at work) — they read this in two',
+    'seconds, not study it.',
     '',
     'You are given:',
-    '  - moment_kind: what triggered this note. It is one of:',
-    '      on_creation     — the goal was just created.',
-    '      request_by      — it is time to request one or more external',
-    '                        items that have a long turnaround, so they',
-    '                        arrive before the deadline.',
-    '      seven_days_out  — the deadline is one week away.',
-    '      two_days_out    — the deadline is two days away.',
-    '      due_today       — the deadline is today.',
-    '      overdue         — the deadline has passed.',
+    '  - moment_kind: what triggered this note.',
     '  - goal: title, deadline, days_until_deadline, risk_level.',
-    '  - done: items the user already has or has completed.',
-    '  - waiting: items waiting on someone else, with depends_on and',
-    '    requested_at where present.',
-    '  - in_progress: items the user is actively working on.',
-    '  - not_started: items on the goal that have not been started.',
-    '  - overdue: items past their expected turnaround, with days_overdue.',
-    '  - critical_path: items the timeline is currently waiting on, with',
-    '    remaining_days.',
-    '  - request_by_items: items the request_by moment is about. Only',
-    '    present when moment_kind is request_by. Each has a label, the',
-    '    turnaround in days, and the date by which the request needs to',
-    '    go out.',
+    '  - done: items the user has.',
+    '  - waiting: items waiting on someone else.',
+    '  - in_progress: items the user is working on.',
+    '  - not_started: items on the goal not yet started.',
+    '  - overdue: items past their expected turnaround.',
+    '  - critical_path: items the timeline is waiting on.',
+    '  - request_by_items: only when the moment is request_by.',
     '',
-    'FRAMING FOR THIS MOMENT:',
+    'WHAT THIS MOMENT IS ABOUT:',
     framing,
     '',
     'RULES:',
-    '- Write 2 to 4 short paragraphs separated by blank lines.',
-    '- Paragraph 1: name the goal and when it is due, then set the frame',
-    '  based on the moment above. Follow the FRAMING FOR THIS MOMENT',
-    '  section closely.',
-    '- Paragraph 2: say what the user already has, then what is still',
-    '  pending. Name EVERY item from done, waiting, in_progress, and',
-    '  not_started. Use the labels verbatim.',
-    '- For waiting items, say who it is waiting on and, when requested_at',
-    '  is present, when it was requested. Write it the way a person would:',
-    '  "you sent the request on Nov 1", not "requested_at: 2026-11-01".',
-    '- For items with typical_turnaround_days, mention the turnaround only',
-    '  if it is relevant to the deadline or to the request_by framing.',
-    '- CLOSING LINE. Never reassure the user when work remains.',
-    '    * If done is the only non-empty group — every item is done —',
-    '      the closing may say the goal is set, or nothing is outstanding.',
-    '    * If ANY of waiting, in_progress, or not_started has entries,',
-    '      do NOT say "on track", "looks good", "steady pace", "you\'re',
-    '      set", "nothing to worry about", or any other phrase that',
-    '      implies the goal is fine. Instead, close with a short factual',
-    '      note: name what is still pending, or state the deadline.',
-    '      Tone is factual, not encouraging.',
-    '    * Never write a closing line that contradicts the body above.',
-    '- Vary your openings. Do not always start with "Heads up" or',
-    '  "Quick note". Rotate.',
-    '- Vary the sentence structure for the done group:',
-    '    "You\'ve got X and Y ready." / "X and Y are done." /',
-    '    "You\'re set on X and Y."',
-    '- Vary how you say the pending group.',
-    '- Second person throughout. No bullet points. No numbered lists. No',
-    '  status labels like "waiting_on_other" or "in_progress". Use plain',
-    '  English: "you\'re waiting on" / "you haven\'t started" /',
-    '  "you\'re working on".',
-    '- Do NOT mention any item that is not in the facts.',
-    '- Do NOT offer to do anything. Do NOT say "want me to". The note is',
-    '  informational. The user will act on it if they want to.',
-    '- Keep it under 110 words.',
+    '- ONE short message. ONE paragraph, two sentences at most. No line',
+    '  breaks, no headers like "Heads up", no colons introducing a list.',
+    '- Lead with the single thing the user needs to know or do right',
+    '  now — not every pending item, just the one (or two, max) that',
+    '  matters for this moment.',
+    '- Talk the way a sharp friend would text it, not the way a status',
+    '  report would summarize it. Never say a goal "is at risk because"',
+    '  — just say plainly what is going on and what to do.',
+    '  Bad: "The scholarship application is at risk because the test',
+    '  scores are still pending." Good: "Test scores for the',
+    '  scholarship app are cutting it close — worth requesting today."',
+    '- If an item label is long or technical (e.g. has an acronym or a',
+    '  parenthetical), refer to it by its plain-English gist instead of',
+    '  repeating the whole label. Say "your test scores", not the full',
+    '  official label with every acronym and institution name attached.',
+    '- Never reuse the wording from WHAT THIS MOMENT IS ABOVE verbatim —',
+    '  it is background for you, not a sentence to output.',
+    '- Do not use em-dashes, exclamation marks, or semicolons.',
+    '- Do not reassure when work remains. Do not say "on track",',
+    '  "looks good", "steady pace", "you\'re set", or "nothing to',
+    '  worry about" if anything is outstanding.',
+    '- Second person. No bullet points, no numbered lists, no status',
+    '  labels like "waiting_on_other". Plain, spoken English.',
+    '- Do not offer to do anything. Do not say "want me to". This is a',
+    '  heads-up, not an offer.',
+    '- Under 35 words total.',
     '',
     'Return plain text only. No JSON, no quotes, no preamble.',
   ].join('\n');
@@ -445,6 +650,7 @@ export async function phraseProactiveMessage(facts, momentKind = null) {
       overdue: facts.overdue,
       critical_path: facts.critical_path,
       request_by_items: facts.request_by_items ?? undefined,
+      due_tasks: facts.due_tasks ?? undefined,
     },
     null,
     2
@@ -461,39 +667,42 @@ function buildFramingForKind(rootKind) {
   const lines = [];
   switch (rootKind) {
     case 'on_creation':
-      lines.push('  The goal was just created. Open by acknowledging it and');
-      lines.push('  naming what it will need. Keep it short; the user is');
-      lines.push('  just getting started.');
+      lines.push('  You just started tracking this goal. One friendly line —');
+      lines.push('  confirm it and, if there is something worth getting ahead');
+      lines.push('  of, nudge toward it.');
       break;
     case 'request_by':
-      lines.push('  This is a REQUEST-BY reminder. The items below take a long');
-      lines.push('  time to arrive from someone else, and if the request does');
-      lines.push('  not go out soon, they will not arrive before the deadline.');
-      lines.push('  Lead with that. Say which items need to be requested and');
-      lines.push('  when. Use a phrase like "you should send the request for');
-      lines.push('  X by <date>". Do NOT use "today" unless the request-by');
-      lines.push('  date is today or already past.');
+      lines.push('  Something that depends on another person needs to go out');
+      lines.push('  soon, or the timeline gets tight. The point: ask for it now');
+      lines.push('  rather than later. Name the item in plain words and the');
+      lines.push('  rough timing, not a formal "request by" date if you can');
+      lines.push('  help it.');
       break;
     case 'seven_days_out':
-      lines.push('  One week remains. State that plainly and name what is');
-      lines.push('  still to be done.');
+      lines.push('  About a week left. Mention that casually, then the one');
+      lines.push('  thing most worth doing next.');
       break;
     case 'two_days_out':
-      lines.push('  Two days remain. The tone should be more urgent but');
-      lines.push('  still factual. Name what is left.');
+      lines.push('  Two days left — this one should feel a bit more urgent');
+      lines.push('  than a routine check-in. Say what still needs doing.');
       break;
     case 'due_today':
-      lines.push('  The deadline is today. Say so plainly. Name what is');
-      lines.push('  still outstanding. No reassurance.');
+      lines.push('  It is due today. Say that plainly, then the one thing');
+      lines.push('  still outstanding. No cheerleading.');
       break;
     case 'overdue':
-      lines.push('  The deadline has passed. State how many days ago. Name');
-      lines.push('  what is still outstanding. End by noting that the user');
-      lines.push('  can say "extend to <new date>" to set a new deadline, or');
-      lines.push('  "continue" to leave it as is.');
+      lines.push('  The deadline already passed. Say how long ago in passing');
+      lines.push('  (e.g. "a couple days"), name what is still outstanding, and');
+      lines.push('  mention they can say "extend to <date>" if they need a new');
+      lines.push('  deadline.');
+      break;
+    case 'task_due':
+      lines.push('  A task they said they would do is due today. Just name it');
+      lines.push('  as a quick reminder, one sentence.');
       break;
     default:
-      lines.push('  No special framing. Write a plain status note.');
+      lines.push('  Nothing special about the timing — just a quick, plain');
+      lines.push('  status note.');
       break;
   }
   return lines.join('\n');

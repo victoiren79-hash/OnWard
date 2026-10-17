@@ -5,7 +5,8 @@
 //   POST /mcp                  → MCP JSON-RPC
 //   POST /demo/advance         → demo/test aid: advance the in-process clock
 //   POST /demo/reset           → demo/test aid: reset the clock to real time
-//   GET  /demo/pending-flag    → demo/test aid: return the session's pending flag
+//   GET  /demo/clock-state     → demo/test aid: read the clock without changing it
+//   GET  /demo/pending-flag    → demo/test aid: return the session's pending flag (validated)
 
 import 'dotenv/config';
 import http from 'node:http';
@@ -18,7 +19,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { handleStatement, reevaluateAllGoals } from './orchestrator.js';
+import { handleStatement, reevaluateAllGoals, getValidatedPendingFlag } from './orchestrator.js';
 import {
   listGoals,
   getGoal,
@@ -30,6 +31,7 @@ import {
   getSession,
 } from './db.js';
 import { getSendFollowupTool } from './services/actionExecutor.js';
+import { readTimeTag, writeTimeTag } from './services/conversation.js';
 
 // ---------------------------------------------------------------------------
 // send_followup tool
@@ -152,6 +154,7 @@ async function toolListGoals(args) {
       id: g.id,
       title: g.title,
       deadline: g.deadline,
+      deadline_time: readTimeTag(g.context),
       goal_type: g.goal_type,
       status: g.status,
       created_at: g.created_at,
@@ -180,6 +183,8 @@ async function toolGetGoal(args) {
       id: goal.id,
       title: goal.title,
       deadline: goal.deadline,
+      deadline_time: readTimeTag(goal.context),
+      context: writeTimeTag(goal.context ?? null, null),
       goal_type: goal.goal_type,
       status: goal.status,
       created_at: goal.created_at,
@@ -194,7 +199,11 @@ async function toolGetGoal(args) {
       typical_turnaround_days: r.typical_turnaround_days,
       requested_at: r.requested_at,
       received_at: r.received_at,
-      notes: r.notes,
+      due_at: r.due_at,
+      due_time: readTimeTag(r.notes),
+      expected_at: r.expected_at,
+      linked_requirement_id: r.linked_requirement_id,
+      notes: writeTimeTag(r.notes ?? null, null),
       created_at: r.created_at,
       updated_at: r.updated_at,
     })),
@@ -342,9 +351,35 @@ async function handleDemoReset(res) {
 
 async function handleDemoPendingFlag(res) {
   try {
-    const session = await getSession();
+    // Validated, not a raw cache read: a flag left over from before someone
+    // cleared the database directly would otherwise keep pointing at a
+    // goal that no longer exists. See getValidatedPendingFlag's comment.
+    const flag = await getValidatedPendingFlag();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ pending_flag: session.pending_flag ?? null }));
+    res.end(JSON.stringify({ pending_flag: flag }));
+  } catch (e) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+// Read-only clock status: lets the frontend re-sync the "Clock: ..." display
+// after a page refresh WITHOUT mutating the clock. The clock's simulated
+// cursor lives only in this process's memory (see services/clock.js) — a
+// browser refresh doesn't touch it, but until now there was no way for the
+// page to ask "what's the clock actually at?" without calling /demo/advance
+// (which moves it) or /demo/reset (which resets it). If the frontend was
+// calling either of those just to initialize its display, that would
+// explain the clock silently jumping back to real time on every refresh.
+async function handleDemoClockState(res) {
+  try {
+    const { now, isSimulated, simulatedOffsetDays } = await import('./services/clock.js');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      now: now().toISOString(),
+      simulated: isSimulated(),
+      offset_days: simulatedOffsetDays(),
+    }));
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: e.message }));
@@ -399,6 +434,10 @@ const httpServer = http.createServer(async (req, res) => {
     return handleDemoPendingFlag(res);
   }
 
+  if (req.method === 'GET' && req.url === '/demo/clock-state') {
+    return handleDemoClockState(res);
+  }
+
   if (req.url && req.url.startsWith('/mcp')) {
     if (req.method !== 'POST') {
       res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -428,6 +467,7 @@ httpServer.listen(PORT, () => {
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/advance`);
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/reset`);
   console.error(`[onward]   demo:      GET  http://localhost:${PORT}/demo/pending-flag`);
+  console.error(`[onward]   demo:      GET  http://localhost:${PORT}/demo/clock-state`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

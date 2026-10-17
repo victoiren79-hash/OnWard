@@ -238,6 +238,14 @@ RULES:
    full sentence. E.g. "Recommendation letter", not "I need to get a rec letter".
    Prefer the phrasing the user used, not a generic version.
 
+6b. NEVER invent a vague placeholder requirement such as "Other documents",
+    "Other items", "Remaining documents", "Misc paperwork", or similar. If
+    the user refers to unnamed items in general terms ("the other
+    documents", "whatever else is needed", "the rest of the paperwork")
+    without naming any of them, do NOT create a requirement for that
+    phrase — leave "requirements" without an entry for it. Only extract
+    items that have an identifiable, specific name.
+
 7. GOAL TYPE MATCHING. This rule is critical. Set the goal_type whenever
    ANY of the signals below appear in the message. Do NOT wait for the
    message to be unambiguous. Do NOT default to null when a signal is
@@ -328,6 +336,17 @@ Examples:
     "goal_type": "tax_filing",
     "requirements": [] }
 
+- "I need to enroll my daughter in a new school by October 22. I already
+  have her birth certificate, but I haven't gathered the other documents
+  yet." →
+  { "is_goal": true, "title": "School enrollment for my daughter",
+    "deadline": "<resolved>",
+    "goal_type": "school_enrollment",
+    "requirements": [
+      { "label": "Birth certificate", "kind": "self_action", "status": "done" }
+    ] }
+  // "the other documents" is vague — no item is created for it.
+
 - "what's the weather like" → { "is_goal": false }
 `.trim();
 
@@ -366,6 +385,10 @@ RULES:
 3. "kind" is "external_dependency" ONLY if another person or institution
    must produce, sign, or return the item. Otherwise "self_action". If
    unsure, use "self_action".
+3b. NEVER invent a vague placeholder item such as "Other documents",
+    "Other items", "Remaining documents", or similar. If the user refers
+    to unnamed items in general terms without naming any of them, do NOT
+    create an item for that phrase — omit it from "items" entirely.
 4. "status" is "done" ONLY if the user says they already have the item.
    Otherwise "not_started".
 5. "goal_hints" is an array of goal names the user mentions in the

@@ -32,6 +32,28 @@ function unwrap({ data, error }, context) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline sanitizers for requirement rows.
+//
+// These are duplicated deliberately from services/requirementService.js and
+// services/updateInterpreter.js so that db.js stays free of service imports.
+// If the allowed values ever change, change them here too.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_KINDS = ['self_action', 'external_dependency'];
+const ALLOWED_STATUSES = ['not_started', 'in_progress', 'waiting_on_other', 'done'];
+
+function sanitizeKind(raw) {
+  if (ALLOWED_KINDS.includes(raw)) return raw;
+  console.warn('[onward/db] bad kind', raw);
+  return 'self_action';
+}
+
+function sanitizeStatus(raw, fallback = 'not_started') {
+  if (ALLOWED_STATUSES.includes(raw)) return raw;
+  return fallback;
+}
+
+// ---------------------------------------------------------------------------
 // Goal
 // ---------------------------------------------------------------------------
 
@@ -40,6 +62,7 @@ export async function createGoal({
   deadline,
   goalType = null,
   status = 'active',
+  context = null,
 }) {
   return unwrap(
     await supabase
@@ -49,6 +72,7 @@ export async function createGoal({
         deadline,
         goal_type: goalType,
         status,
+        context,
       })
       .select()
       .single(),
@@ -105,6 +129,9 @@ export async function createRequirement({
   requestedAt = null,
   receivedAt = null,
   notes = null,
+  dueAt = null,
+  expectedAt = null,
+  linkedRequirementId = null,
 }) {
   return unwrap(
     await supabase
@@ -119,6 +146,9 @@ export async function createRequirement({
         requested_at: requestedAt,
         received_at: receivedAt,
         notes,
+        due_at: dueAt,
+        expected_at: expectedAt,
+        linked_requirement_id: linkedRequirementId,
       })
       .select()
       .single(),
@@ -129,6 +159,9 @@ export async function createRequirement({
 /**
  * Batch version of createRequirement. Inserts all rows in one round trip.
  * Returns the inserted rows in the same order as the input array.
+ *
+ * Sanitizes kind and status inline before building rows, so a bad value
+ * from the LLM or a service never reaches the database constraint.
  */
 export async function createRequirementsBatch(goalId, items) {
   if (!Array.isArray(items) || items.length === 0) return [];
@@ -136,13 +169,16 @@ export async function createRequirementsBatch(goalId, items) {
   const rows = items.map((it) => ({
     goal_id: goalId,
     label: it.label,
-    kind: it.kind,
-    status: it.status ?? 'not_started',
+    kind: sanitizeKind(it.kind),
+    status: sanitizeStatus(it.status, 'not_started'),
     depends_on: it.dependsOn ?? null,
     typical_turnaround_days: it.typicalTurnaroundDays ?? null,
     requested_at: it.requestedAt ?? null,
     received_at: it.receivedAt ?? null,
     notes: it.notes ?? null,
+    due_at: it.dueAt ?? null,
+    expected_at: it.expectedAt ?? null,
+    linked_requirement_id: it.linkedRequirementId ?? null,
   }));
 
   const data = unwrap(
@@ -175,6 +211,23 @@ export async function listRequirementsForGoal(goalId) {
       .eq('goal_id', goalId)
       .order('created_at', { ascending: true }),
     'listRequirementsForGoal'
+  );
+}
+
+/**
+ * Batch version of listRequirementsForGoal. One query for many goals.
+ * Returns [] for an empty input without touching the database.
+ */
+export async function listRequirementsForGoals(goalIds) {
+  if (!Array.isArray(goalIds) || goalIds.length === 0) return [];
+
+  return unwrap(
+    await supabase
+      .from('Requirement')
+      .select('*')
+      .in('goal_id', goalIds)
+      .order('created_at', { ascending: true }),
+    'listRequirementsForGoals'
   );
 }
 
@@ -366,7 +419,11 @@ export async function listRiskAssessmentsForGoal(goalId, { limit = 50 } = {}) {
 // The session is read on every conversational turn and written on most.
 // We cache it in module memory so the DB is touched once per process
 // instead of once per turn. saveSession writes through to both the DB
-// and the cache.
+// and the cache, and short-circuits the write entirely when the three
+// conversational fields are unchanged.
+//
+// recent_turns is a separate column that appendTurn owns. saveSession
+// never writes it, so it can't be clobbered by a pending-state update.
 // ---------------------------------------------------------------------------
 
 const SESSION_ID = 'default';
@@ -413,6 +470,22 @@ export async function saveSession({
   pendingFlag = null,
   activeGoalId = null,
 } = {}) {
+  // Short-circuit: if the three conversational fields are identical to
+  // what we already have cached, there is nothing to write.
+  if (sessionCache) {
+    const cachedPC = JSON.stringify(sessionCache.pending_confirmation ?? null);
+    const cachedPF = JSON.stringify(sessionCache.pending_flag ?? null);
+    const cachedAG = sessionCache.active_goal_id ?? null;
+
+    const nextPC = JSON.stringify(pendingConfirmation ?? null);
+    const nextPF = JSON.stringify(pendingFlag ?? null);
+    const nextAG = activeGoalId ?? null;
+
+    if (cachedPC === nextPC && cachedPF === nextPF && cachedAG === nextAG) {
+      return sessionCache;
+    }
+  }
+
   const updated = unwrap(
     await supabase
       .from('Session')
@@ -432,6 +505,57 @@ export async function saveSession({
   );
   sessionCache = updated;
   return updated;
+}
+
+/**
+ * Append one exchange to Session.recent_turns.
+ *
+ * Keeps the last 10 messages. Each content is cut to 400 characters.
+ * User and assistant text are stored as separate entries, in order.
+ *
+ * The cache is updated first, then the DB write is fired for just this
+ * column. If the write fails, the local cache is still consistent and
+ * the caller keeps working — logging is the caller's job.
+ */
+export async function appendTurn(userText, assistantText) {
+  // Make sure the cache is warm.
+  if (!sessionCache) {
+    await getSession();
+  }
+  if (!sessionCache) return null;
+
+  const existing = Array.isArray(sessionCache.recent_turns)
+    ? sessionCache.recent_turns
+    : [];
+
+  const now = Date.now();
+  const entries = [];
+  if (typeof userText === 'string' && userText.length > 0) {
+    entries.push({ role: 'user', content: userText.slice(0, 400) });
+  }
+  if (typeof assistantText === 'string' && assistantText.length > 0) {
+    entries.push({ role: 'assistant', content: assistantText.slice(0, 400) });
+  }
+  if (entries.length === 0) return sessionCache;
+
+  // Attach a timestamp so ordering survives round-tripping through JSON.
+  const stamped = entries.map((e, i) => ({ ...e, ts: now + i }));
+
+  const merged = [...existing, ...stamped].slice(-10);
+
+  // Update the cache before the write.
+  sessionCache = { ...sessionCache, recent_turns: merged };
+
+  try {
+    await supabase
+      .from('Session')
+      .update({ recent_turns: merged })
+      .eq('id', SESSION_ID);
+  } catch (e) {
+    console.warn('[onward/db] appendTurn write failed:', e.message);
+  }
+
+  return sessionCache;
 }
 
 // ---------------------------------------------------------------------------

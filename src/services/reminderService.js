@@ -4,9 +4,12 @@
 //
 // Every goal has a fixed schedule of reminder moments derived from its
 // deadline, plus a per-requirement "request by" moment derived from each
-// external item's typical turnaround. This file answers one question:
-// given a goal, its items, today's date, and the set of moments that
-// have already fired, which moments are due now?
+// external item's typical turnaround, plus a per-task "task due" moment
+// for self_action items that have their own due_at.
+//
+// This file answers one question: given a goal, its items, today's date,
+// and the set of moments that have already fired, which moments are due
+// now?
 //
 // It does NOT send anything, does NOT compose any message, does NOT
 // touch the DB. The caller takes the returned list, picks the top one,
@@ -41,16 +44,26 @@ export const GOAL_LEVEL_MOMENTS = Object.freeze([
 
 /**
  * Priority for sorting all due reminders, highest first. Lower number
- * means "fire this one first." request_by beats every goal-level
- * moment because a request_by means "you are about to miss this item
- * entirely" while goal-level moments are reminders of progress.
+ * means "fire this one first."
+ *
+ *   overdue         the goal is past its deadline
+ *   due_today       the goal itself is due today
+ *   task_due        a self task inside the goal is due today
+ *   request_by      an external item needs to be requested soon
+ *   two_days_out    two days until the goal deadline
+ *   seven_days_out  one week until the goal deadline
+ *
+ * The exact numbers only matter as an ordering. Changing them is safe
+ * as long as the relative order stays: overdue < due_today < task_due
+ * < request_by < two_days_out < seven_days_out.
  */
 const PRIORITY = Object.freeze({
   overdue:          0,
   due_today:        1,
-  request_by:       2,
-  two_days_out:     3,
-  seven_days_out:   4,
+  task_due:         2,
+  request_by:       3,
+  two_days_out:     4,
+  seven_days_out:   5,
 });
 
 // ---------------------------------------------------------------------------
@@ -90,6 +103,10 @@ export function getDueReminders(goal, requirements, today, alreadyFired = []) {
   // --- Goal-level moments -------------------------------------------------
   // Only fire if there is something outstanding. A completed goal does
   // not need to be reminded about itself.
+  //
+  // Goal-level moments keep their start-of-day semantics: the moment
+  // becomes due at 00:00 of the computed day, using the deadline's own
+  // day in UTC. Per-item moments below do the same thing.
   if (outstanding.length > 0) {
     for (const m of GOAL_LEVEL_MOMENTS) {
       if (fired.has(m.kind)) continue;
@@ -124,6 +141,44 @@ export function getDueReminders(goal, requirements, today, alreadyFired = []) {
         label: r.label,
         due_on: toIsoDate(fireOn),
         priority: PRIORITY.request_by,
+      });
+    }
+  }
+
+  // --- Per-task task_due moments ------------------------------------------
+  // A self task with a due_at fires once, on its due date, at 00:00 UTC
+  // of that day. If the task has a linked_requirement_id and that linked
+  // item is already done, the reminder is suppressed — the task no longer
+  // matters because what it depended on has arrived.
+  for (const r of reqs) {
+    if (!r || r.kind !== 'self_action') continue;
+    if (r.status === 'done') continue;
+    if (!r.due_at) continue;
+
+    const kind = `task_due:${r.id}`;
+    if (fired.has(kind)) continue;
+
+    if (r.linked_requirement_id) {
+      const linked = reqs.find((x) => x && x.id === r.linked_requirement_id);
+      if (linked && linked.status === 'done') continue;
+    }
+
+    const dueAt = coerceDate(r.due_at);
+    if (!dueAt) continue;
+
+    const fireOn = new Date(Date.UTC(
+      dueAt.getUTCFullYear(),
+      dueAt.getUTCMonth(),
+      dueAt.getUTCDate()
+    ));
+
+    if (now.getTime() >= fireOn.getTime()) {
+      due.push({
+        kind,
+        requirement_id: r.id,
+        label: r.label,
+        due_on: toIsoDate(fireOn),
+        priority: PRIORITY.task_due,
       });
     }
   }
