@@ -580,7 +580,7 @@ export async function phraseReport(reportData) {
 // composer.
 // ---------------------------------------------------------------------------
 
-export async function phraseProactiveMessage(facts, momentKind = null) {
+export async function phraseProactiveMessage(facts, momentKind = null, opts = {}) {
   if (!facts || typeof facts !== 'object') {
     throw new Error('[onward/phrasing] phraseProactiveMessage: facts must be an object');
   }
@@ -656,7 +656,11 @@ export async function phraseProactiveMessage(facts, momentKind = null) {
     2
   );
 
-  const text = await callLLMText(systemPrompt, userMessage, { temperature: 0.7 });
+  const text = await callLLMText(systemPrompt, userMessage, {
+    temperature: 0.7,
+    reasoningEffort: 'low',
+    signal: opts.signal,
+  });
   if (typeof text !== 'string' || !text.trim()) {
     throw new Error('[onward/phrasing] phraseProactiveMessage: empty response');
   }

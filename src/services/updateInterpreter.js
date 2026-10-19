@@ -585,7 +585,7 @@ export async function interpretTurn({
       raw = await callLLM(SYSTEM_PROMPT, buildMessage(compact), {
         temperature: 0,
         maxTokens: compact ? Math.min(3000, maxTokens) : maxTokens,
-        reasoningEffort: process.env.GROQ_REASONING_EFFORT ? undefined : 'medium',
+        reasoningEffort: process.env.GROQ_REASONING_EFFORT ? undefined : 'low',
       });
       failure = null;
       break;

@@ -99,6 +99,7 @@ export async function callLLM(systemPrompt, userMessage, opts = {}) {
     messages: baseMessages,
     maxTokens: opts.maxTokens,
     reasoningEffort,
+    signal: opts.signal,
   });
 
   const firstParsed = tryParseJson(first.content);
@@ -123,6 +124,7 @@ export async function callLLM(systemPrompt, userMessage, opts = {}) {
     messages: repairMessages,
     maxTokens: opts.maxTokens,
     reasoningEffort,
+    signal: opts.signal,
   });
 
   const secondParsed = tryParseJson(second.content);
@@ -148,6 +150,7 @@ async function requestCompletion({
   messages,
   maxTokens,
   reasoningEffort = null,
+  signal,
 }) {
   const body = {
     model,
@@ -161,14 +164,14 @@ async function requestCompletion({
 
   let response;
   try {
-    response = await postWithRetry('/chat/completions', body);
+    response = await postWithRetry('/chat/completions', body, signal);
   } catch (err) {
     // If the failure was Groq rejecting reasoning_effort, note it, drop
     // the field, and try once more so this call still succeeds.
     if (noteReasoningEffortRejected(err.cause?.response ? err.cause : err.cause ?? err)) {
       delete body.reasoning_effort;
       try {
-        response = await postWithRetry('/chat/completions', body);
+        response = await postWithRetry('/chat/completions', body, signal);
       } catch (err2) {
         throw normalizeAxiosError(err2.cause ?? err2);
       }
@@ -210,14 +213,17 @@ const RETRYABLE_AXIOS_CODES = new Set([
 const RETRY_WAITS_MS = [500, 1500];
 const RETRY_AFTER_CAP_MS = 5000;
 
-async function postWithRetry(path, body) {
+async function postWithRetry(path, body, signal) {
   let lastErr = null;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await client.post(path, body);
+      return await client.post(path, body, signal ? { signal } : undefined);
     } catch (err) {
       lastErr = err;
+
+      // The caller gave up (timeout). Don't retry, don't wait.
+      if (signal?.aborted || err?.code === 'ERR_CANCELED') break;
 
       const status = err?.response?.status;
       const code = err?.code;
@@ -239,6 +245,7 @@ async function postWithRetry(path, body) {
         }
       }
 
+      if (signal?.aborted) break;
       await sleep(waitMs);
     }
   }
@@ -322,6 +329,7 @@ export async function callLLMText(systemPrompt, userMessage, opts = {}) {
   }
 
   const reasoningEffort = resolveReasoningEffort(opts);
+  const signal = opts.signal;
 
   const body = {
     model: opts.model ?? DEFAULT_MODEL,
@@ -336,12 +344,12 @@ export async function callLLMText(systemPrompt, userMessage, opts = {}) {
 
   let response;
   try {
-    response = await postWithRetry('/chat/completions', body);
+    response = await postWithRetry('/chat/completions', body, signal);
   } catch (err) {
     if (noteReasoningEffortRejected(err.cause ?? err)) {
       delete body.reasoning_effort;
       try {
-        response = await postWithRetry('/chat/completions', body);
+        response = await postWithRetry('/chat/completions', body, signal);
       } catch (err2) {
         throw normalizeAxiosError(err2.cause ?? err2);
       }

@@ -120,17 +120,17 @@ test('renderGoalReport: expected_after_deadline reason renders and item line sho
 // renderLateOptions
 // ---------------------------------------------------------------------------
 
-test('renderLateOptions: contains all three numbered options', () => {
+test('renderLateOptions: contains all three options', () => {
   const text = renderLateOptions('Previous school report', 'Previous school');
-  assert.match(text, /Options:/);
-  assert.match(text, /1\. Ask Previous school/);
-  assert.match(text, /2\. Give "Previous school report" its own later due date/);
-  assert.match(text, /3\. Move the whole goal's deadline/);
+  assert.match(text, /A few ways to handle it/);
+  assert.match(text, /ask Previous school if it can come in late/);
+  assert.match(text, /Previous school report its own later date/);
+  assert.match(text, /push the whole goal back/);
 });
 
 test('renderLateOptions: falls back to "the receiving party" with no dependsOn', () => {
   const text = renderLateOptions('Report', null);
-  assert.match(text, /1\. Ask the receiving party/);
+  assert.match(text, /ask whoever is receiving it/);
 });
 
 // ---------------------------------------------------------------------------
@@ -213,6 +213,6 @@ test('renderAdvice: expected_after_deadline produces the reason line and late op
   const out = renderAdvice([{ goal: goal(), requirements, risk }]);
   const joined = out.lines.join('\n');
   assert.match(joined, /Previous school report is expected 2026-10-17/);
-  assert.match(joined, /Options:/);
-  assert.match(joined, /1\. Ask Previous school/);
+  assert.match(joined, /A few ways to handle it/);
+  assert.match(joined, /ask Previous school if it can come in late/);
 });

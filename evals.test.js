@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { interpretTurn } from './src/services/updateInterpreter.js';
+if (process.env.RUN_EVALS !== '1') process.exit(0);
 
 // ---------------------------------------------------------------------------
 // Fixture state

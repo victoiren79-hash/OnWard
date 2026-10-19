@@ -136,12 +136,12 @@ test('canTransition: self_action cannot enter waiting_on_other', () => {
   assert.equal(canTransition('self_action', 'in_progress', 'waiting_on_other'), false);
 });
 
-test('canTransition: external_dependency cannot skip waiting_on_other to done', () => {
-  assert.equal(canTransition('external_dependency', 'not_started', 'done'), false);
-  assert.equal(canTransition('external_dependency', 'in_progress', 'done'), false);
+test('canTransition: external_dependency can go straight to done (item arrived without a logged request)', () => {
+  assert.equal(canTransition('external_dependency', 'not_started', 'done'), true);
+  assert.equal(canTransition('external_dependency', 'in_progress', 'done'), true);
 });
 
-test('canTransition: external_dependency must go through waiting_on_other', () => {
+test('canTransition: external_dependency can enter waiting_on_other and leave it for done', () => {
   assert.equal(canTransition('external_dependency', 'not_started', 'waiting_on_other'), true);
   assert.equal(canTransition('external_dependency', 'in_progress', 'waiting_on_other'), true);
   assert.equal(canTransition('external_dependency', 'waiting_on_other', 'done'), true);
@@ -158,8 +158,9 @@ test('allowedNextStates: self_action from not_started is [in_progress, done]', (
   assert.deepEqual(next.sort(), ['done', 'in_progress']);
 });
 
-test('allowedNextStates: external_dependency from not_started is [waiting_on_other]', () => {
-  assert.deepEqual(allowedNextStates('external_dependency', 'not_started'), [
+test('allowedNextStates: external_dependency from not_started is [waiting_on_other, done]', () => {
+  assert.deepEqual(allowedNextStates('external_dependency', 'not_started').sort(), [
+    'done',
     'waiting_on_other',
   ]);
 });
@@ -252,12 +253,20 @@ test('applyTransition: rejects waiting_on_other for self_action with ok:false', 
   assert.match(result.reason, /illegal transition/);
 });
 
-test('applyTransition: rejects external not_started -> done with ok:false', () => {
+test('applyTransition: external not_started -> done sets received_at and leaves requested_at empty', () => {
   const ext = makeExternal();
   const result = applyTransition(ext, 'done', { at: T0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.next.status, 'done');
+  assert.equal(result.next.received_at?.getTime(), T0.getTime());
+  assert.equal(result.next.requested_at, null);
+});
+
+test('applyTransition: rejects external not_started -> in_progress with ok:false', () => {
+  const ext = makeExternal();
+  const result = applyTransition(ext, 'in_progress', { at: T0 });
   assert.equal(result.ok, false);
   assert.match(result.reason, /illegal transition/);
-  assert.equal(result.nearestLegal, 'waiting_on_other');
 });
 
 test('applyTransition: no-op returns ok:false', () => {

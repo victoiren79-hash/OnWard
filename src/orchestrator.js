@@ -75,7 +75,7 @@ const USE_LLM_PHRASING =
 // naturally as the LLM version, so there's no reason to make a busy person
 // wait out a slow model call before falling back to it.
 const PHRASING_TIMEOUT_MS = 3500;
-const SUGGEST_TIMEOUT_MS = 4500;
+const SUGGEST_TIMEOUT_MS = 8000;
 const DEADLINE_REPLY_TIMEOUT_MS = 12000;
 
 // ---------------------------------------------------------------------------
@@ -237,6 +237,22 @@ function withTimeout(promise, ms) {
       (e) => { clearTimeout(timer); reject(e); }
     );
   });
+}
+
+// Like withTimeout, but actually cancels the underlying request when the
+// time is up, so a slow call stops eating rate limit in the background.
+// fn receives an AbortSignal and should pass it down to callLLM.
+async function withAbortableTimeout(fn, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fn(controller.signal);
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error('phrasing timeout');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,8 +1027,10 @@ async function finishCreation({
     }
   }
 
-  let creationFlag = null;
-  if (candidate) {
+  // The reminder message and the suggestions don't depend on each other,
+  // so they run at the same time.
+  const buildCreationFlag = async () => {
+    if (!candidate) return null;
     try {
       const top = candidate.due[0];
       const facts = buildFlagFacts(
@@ -1023,7 +1041,8 @@ async function finishCreation({
         top.kind
       );
       const message = await buildReminderMessage(facts, top.kind);
-      creationFlag = {
+      await markRemindersFired(candidate.c.goal, candidate.due.map((d) => d.kind));
+      return {
         goalId: candidate.c.goal.id,
         goalTitle: candidate.c.goal.title,
         momentKind: top.kind,
@@ -1031,13 +1050,12 @@ async function finishCreation({
         reasons: candidate.risk.reasons,
         message,
       };
-      await markRemindersFired(candidate.c.goal, candidate.due.map((d) => d.kind));
     } catch (e) {
       console.error('[onward] finishCreation: reminder build failed:', e);
+      return null;
     }
-  }
+  };
 
-  // ---- one suggestion pass for every new goal ------------------------------
   const entries = created.map((c) => {
     const diff = findMissingRequirements(c.goal, c.createdReqs, c.template);
     return {
@@ -1049,11 +1067,14 @@ async function finishCreation({
     };
   });
 
-  const suggestion = await buildSuggestions(entries, {
-    userText: rawText,
-    today,
-    askAtEnd: needDate.length === 0,
-  });
+  const [creationFlag, suggestion] = await Promise.all([
+    buildCreationFlag(),
+    buildSuggestions(entries, {
+      userText: rawText,
+      today,
+      askAtEnd: needDate.length === 0,
+    }),
+  ]);
 
   const newOffers = offerEntriesFrom(entries, suggestion);
   const offerEntries = [...heldOffers, ...newOffers];
@@ -1139,8 +1160,8 @@ async function buildSuggestions(entries, { userText, today, askAtEnd }) {
 
   if (USE_LLM_PHRASING) {
     try {
-      return await withTimeout(
-        suggestRequirements(entries, { userText, today, askAtEnd }),
+      return await withAbortableTimeout(
+        (signal) => suggestRequirements(entries, { userText, today, askAtEnd, signal }),
         SUGGEST_TIMEOUT_MS
       );
     } catch (e) {
@@ -2923,8 +2944,8 @@ async function buildReminderMessage(facts, momentKind) {
     return composeProactiveMessageFallback(facts);
   }
   try {
-    const m = await withTimeout(
-      phraseProactiveMessage(facts, momentKind),
+    const m = await withAbortableTimeout(
+      (signal) => phraseProactiveMessage(facts, momentKind, { signal }),
       PHRASING_TIMEOUT_MS
     );
     if (m && m.trim()) return m;

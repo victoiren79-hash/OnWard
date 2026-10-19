@@ -51,9 +51,13 @@ const TRANSITIONS = Object.freeze({
     done: Object.freeze(['in_progress']),
   }),
 
+  // An external item can arrive without Onward ever seeing a request go out
+  // ("just received the vaccination records"), so not_started and
+  // in_progress can go straight to done. Without this, "received" was
+  // squeezed to the nearest legal state, waiting_on_other.
   external_dependency: Object.freeze({
-    not_started: Object.freeze(['waiting_on_other']),
-    in_progress: Object.freeze(['waiting_on_other']),
+    not_started: Object.freeze(['waiting_on_other', 'done']),
+    in_progress: Object.freeze(['waiting_on_other', 'done']),
     waiting_on_other: Object.freeze(['done', 'in_progress']),
     done: Object.freeze(['waiting_on_other']),
   }),

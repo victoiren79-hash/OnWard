@@ -73,7 +73,8 @@ Create a `.env` file at the project root (never commit this — see `.gitignore`
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-GROK_API_KEY=your_api_key
+GROQ_API_KEY=your_api_key
+GROQ_REASONING_EFFORT=medium
 PORT=3000
 ```
 

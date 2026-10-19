@@ -204,7 +204,6 @@ function friendlyDay(deadline, today = new Date()) {
   if (diff === -1) return 'yesterday';
   if (diff < -1) return `${Math.abs(diff)} days ago`;
   if (diff <= 6) return weekday;
-  if (diff <= 13) return `next ${weekday}`;
   const sameYear = y === t.getUTCFullYear();
   return sameYear ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${d}, ${y}`;
 }
@@ -379,7 +378,11 @@ export async function suggestRequirements(entries, opts = {}) {
     'RULES FOR SUGGESTIONS',
     '- Suggest only things that are genuinely useful for THAT goal.',
     '- A trivial goal (buy milk, pay a bill) may need zero or one suggestion.',
-    '  Never pad. Returning nothing for a goal is fine.',
+    '  Anything with several steps, other people, paperwork or lead time',
+    '  (buying a house, renewing insurance, a move, a trip) ALWAYS deserves',
+    '  2 to 4 suggestions. Never pad, but do not leave a real goal empty.',
+    '- When MUST INCLUDE and CANDIDATES are both (none), there is no template',
+    '  for that goal. Use your own knowledge of what that task involves.',
     '- At most 4 per goal. Short noun phrases, the way a person would say them.',
     '- Do not repeat anything in "already has".',
     '- Items under MUST INCLUDE must be suggested with exactly that label.',
@@ -423,7 +426,12 @@ export async function suggestRequirements(entries, opts = {}) {
     lines.push(`  CANDIDATES: ${cand.length ? cand.map((l) => JSON.stringify(l)).join(', ') : '(none)'}`);
   }
 
-  const raw = await callLLM(system, lines.join('\n'), { temperature: 0.5, maxTokens: 3000 });
+  const raw = await callLLM(system, lines.join('\n'), {
+    temperature: 0.5,
+    maxTokens: 3000,
+    reasoningEffort: 'low',
+    signal: opts.signal,
+  });
 
   const byId = new Map(list.map((e) => [e.goal.id, e]));
   const perGoal = [];
@@ -455,6 +463,7 @@ export async function suggestRequirements(entries, opts = {}) {
   // always spoken.
   const lower = text.toLowerCase();
   const missedEssentials = [];
+  const unmentioned = [];
   for (const pg of perGoal) {
     const entry = byId.get(pg.goal_id);
     const essentialKeys = new Set((entry.essentials ?? []).map((x) => normalizeLabel(x.label)));
@@ -466,20 +475,25 @@ export async function suggestRequirements(entries, opts = {}) {
       }
     }
 
-    pg.items = pg.items.filter((it) => {
-      if (lower.includes(it.label.toLowerCase())) return true;
-      if (essentialKeys.has(normalizeLabel(it.label))) {
-        missedEssentials.push(it.label);
-        return true;
+    // Keep every item. If the spoken text doesn't mention one by its exact
+    // label, the text is rebuilt below so the user still hears all of them.
+    for (const it of pg.items) {
+      if (!lower.includes(it.label.toLowerCase())) {
+        if (essentialKeys.has(normalizeLabel(it.label))) missedEssentials.push(it.label);
+        else unmentioned.push(it.label);
       }
-      return false;
-    });
+    }
   }
+
+  console.error(
+    `[onward/suggest] items=${perGoal.map((pg) => pg.items.length).join(',') || 'none'} ` +
+      `unmentioned=${unmentioned.length} textLen=${text.length}`
+  );
 
   const anyItems = perGoal.some((pg) => pg.items.length > 0);
   if (!anyItems) return { text: '', per_goal: perGoal };
 
-  if (!text) {
+  if (!text || unmentioned.length > 0) {
     const bits = perGoal
       .filter((pg) => pg.items.length > 0)
       .map((pg) => {
