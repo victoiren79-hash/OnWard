@@ -29,17 +29,35 @@ It handles one specific shape of thing: **a deadline, a list of requirements, an
 
 ---
 
+## How you use it
+
+Onward is voice-first. You tap the orb, speak, and Onward answers out loud.
+
+- **The orb** is the single control. Its ring shows what it's doing: a steady pulse while listening, a travelling arc while it's thinking, a talking rhythm while it's speaking. Tap it again while Onward is talking to cut it off and take your turn back.
+- **Live captions** show what Onward heard and what it said as it happens, so the conversation is fully readable with the sound off. Short replies stay centered; longer ones left-align and scroll within a bounded area.
+- **The goals panel** on the right is the itemized, always-current checklist for every active goal — deadlines, per-item status, progress bars, and dependency details. It updates the moment anything changes, so every spoken claim is checkable at a glance.
+- **Reminder banner.** Proactive heads-ups appear as a dismissible banner above the orb.
+- **Time travel.** A small demo panel advances the clock by a day, two days, or five days and immediately re-evaluates every goal, so the risk and reminder system can be demonstrated without waiting in real time.
+- The conversation ends naturally after two quiet turns.
+
+Speech input uses the browser's `SpeechRecognition` (Chrome or Edge). Speech output uses Groq's Orpheus voice through the server, with the browser's own voice taking over transparently whenever the voice service is unavailable.
+
+---
+
 ## Why this fits the Alexa+ track
 
 The hackathon's own rubric calls a basic MCP wrapper or single-turn Q&A bot "obvious," and calls out **context-aware add-ons that maintain state across sessions** as the creative bar. Onward is built around exactly that: a goal's state — what's done, what's waiting on someone, what's at risk — persists across every conversation and gets reasoned over continuously, not answered fresh each time.
+
+It is also shaped like the assistant the track asks for: a tap-to-talk orb with spoken answers, interruption, and conversational turn-taking, backed by an MCP server that a real Alexa+ client could call the same way the bundled interface does.
 
 ---
 
 ## Architecture
 
-- **MCP server** — Streamable HTTP transport, spec 2025-11-25+, built with the official `@modelcontextprotocol/sdk`. Exposes tools (`report_statement`, `list_goals`, `get_goal`, delete and follow-up tools) that a real Alexa+ MCP integration or the included web frontend both call the same way.
-- **Web frontend** — a chat interface plus a live checklist panel, built per the hackathon's explicit allowance for a simulated Alexa+ experience ("no specific framework or SDK required" for that path). Every status report is itemized, never a vague summary, so the system's claims are always checkable at a glance.
+- **MCP server** — Streamable HTTP transport, spec 2025-11-25+, built with the official `@modelcontextprotocol/sdk`. Exposes tools (`report_statement`, `list_goals`, `get_goal`, delete and follow-up tools) that a real Alexa+ MCP integration or the included frontend both call the same way. It also serves the frontend, the text-to-speech endpoint, and the demo clock controls.
+- **Frontend** — a single-page, voice-only interface with an animated talk orb, live captions, and a live checklist panel, built per the hackathon's explicit allowance for a simulated Alexa+ experience ("no specific framework or SDK required" for that path). Every status report is itemized, never a vague summary, so the system's claims are always checkable at a glance.
 - **LLM** — [Groq API](https://console.groq.com), used for natural-language extraction, status-update interpretation, and conversational phrasing. Deterministic logic (risk calculation, state transitions, completeness checks) is kept separate from the LLM layer on purpose — the LLM reads and writes language, the backend owns every fact and every number.
+- **Text to speech** — Groq's Orpheus model through the server, with the browser voice as a transparent fallback.
 - **Storage** — Supabase (Postgres).
 
 ### Deterministic vs. LLM — the dividing line
@@ -55,6 +73,7 @@ The hackathon's own rubric calls a basic MCP wrapper or single-turn Q&A bot "obv
 | Phrasing a flag or report in natural language | LLM, strictly rendering only data it was given |
 | Drafting a follow-up message | LLM |
 | Sending a follow-up | MCP tool, user-confirmed, never automatic |
+| Speaking a reply | Groq TTS, browser voice as fallback |
 
 ---
 
@@ -65,6 +84,7 @@ The hackathon's own rubric calls a basic MCP wrapper or single-turn Q&A bot "obv
 - Node.js 18+
 - A [Supabase](https://supabase.com) project
 - A [Groq API](https://console.groq.com) key
+- Chrome or Edge for the voice interface
 
 ### Environment variables
 
@@ -80,6 +100,14 @@ PORT=3000
 
 A `.env.example` with the same placeholder keys is committed for reference.
 
+Optional voice settings:
+
+```
+GROQ_TTS=on                      # "off" forces the browser voice
+GROQ_TTS_MODEL=canopylabs/orpheus-v1-english
+GROQ_TTS_VOICE=hannah
+```
+
 ### Install and run
 
 ```bash
@@ -88,11 +116,14 @@ node src/seed.js      # seeds the goal-type templates (run once)
 node src/server.js
 ```
 
-The server starts three things:
+The server starts:
 
-- `http://localhost:3000/` — the web frontend
+- `http://localhost:3000/` — the voice frontend
 - `http://localhost:3000/mcp` — the MCP endpoint (Streamable HTTP, JSON-RPC)
-- `POST /demo/advance` and `POST /demo/reset` — demo/test aids for simulating time passing, so proactive risk flagging can be demonstrated without waiting in real time
+- `POST /tts` — text-to-speech for the frontend (returns `503` when unavailable, which triggers the browser-voice fallback)
+- `POST /demo/advance`, `POST /demo/reset`, `GET /demo/clock-state`, `GET /demo/pending-flag` — demo/test aids for simulating time passing and inspecting session state
+
+Open the frontend in Chrome or Edge, tap the orb, and speak.
 
 ### Database schema
 
@@ -102,7 +133,7 @@ Run the SQL in `schema.sql` (or the project's Supabase SQL Editor) to create the
 
 ## Alexa+ integration path
 
-This submission takes the hackathon's **simulated Alexa+ experience** path: the MCP server is fully spec-compliant (Streamable HTTP, real tool definitions) and the included web frontend calls it exactly the way a real Alexa+ MCP client would, satisfying the rule that this path requires "no specific framework or SDK" while still including the simulation's full source. Real registration into Alexa+ itself goes through Amazon's MCP Toolkit, which is currently limited to selected partners.
+This submission takes the hackathon's **simulated Alexa+ experience** path: the MCP server is fully spec-compliant (Streamable HTTP, real tool definitions) and the included frontend calls it exactly the way a real Alexa+ MCP client would, satisfying the rule that this path requires "no specific framework or SDK" while still including the simulation's full source. Real registration into Alexa+ itself goes through Amazon's MCP Toolkit, which is currently limited to selected partners.
 
 ---
 

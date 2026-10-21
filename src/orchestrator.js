@@ -18,6 +18,7 @@ import {
   updateRequirement,
   updateGoal,
   deleteRequirement,
+  deleteRequirements,
   deleteGoal,
   appendEvent,
   appendEventsBatch,
@@ -76,6 +77,7 @@ const USE_LLM_PHRASING =
 // wait out a slow model call before falling back to it.
 const PHRASING_TIMEOUT_MS = 3500;
 const SUGGEST_TIMEOUT_MS = 8000;
+const VOICE_SUGGEST_TIMEOUT_MS = 5000;
 const DEADLINE_REPLY_TIMEOUT_MS = 12000;
 
 // ---------------------------------------------------------------------------
@@ -650,12 +652,12 @@ async function markRemindersFired(goal, kinds) {
   for (const k of kinds) set.add(k);
   const next = [...set];
 
-  try {
-    await updateGoal(goal.id, { reminders_fired: next });
-    goal.reminders_fired = next;
-  } catch (e) {
+  // Record it locally right away and save in the background. The cache is
+  // patched at once, so the next turn already sees these as fired.
+  goal.reminders_fired = next;
+  updateGoal(goal.id, { reminders_fired: next }).catch((e) => {
     console.error('[onward] markRemindersFired failed for goal', goal.id, e);
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,7 +1042,9 @@ async function finishCreation({
         candidate.due,
         top.kind
       );
-      const message = await buildReminderMessage(facts, top.kind);
+      // Built from the facts directly: a model call here would hold up the
+      // spoken reply, and the banner reads fine without one.
+      const message = composeProactiveMessageFallback(facts);
       await markRemindersFired(candidate.c.goal, candidate.due.map((d) => d.kind));
       return {
         goalId: candidate.c.goal.id,
@@ -1158,22 +1162,41 @@ async function buildSuggestions(entries, { userText, today, askAtEnd }) {
   const empty = { text: '', per_goal: [] };
   if (entries.length === 0) return empty;
 
-  if (USE_LLM_PHRASING) {
+  // Goals with a template already know what they need, so those are answered
+  // instantly with no model call. Only goals with no template (insurance,
+  // a new house, ...) wait on the model.
+  const typed = entries.filter((e) => e.goal.goal_type);
+  const untyped = entries.filter((e) => !e.goal.goal_type);
+
+  let llm = null;
+  if (untyped.length > 0 && USE_LLM_PHRASING) {
     try {
-      return await withAbortableTimeout(
-        (signal) => suggestRequirements(entries, { userText, today, askAtEnd, signal }),
-        SUGGEST_TIMEOUT_MS
+      llm = await withAbortableTimeout(
+        (signal) => suggestRequirements(untyped, { userText, today, askAtEnd, signal }),
+        VOICE_SUGGEST_TIMEOUT_MS
       );
     } catch (e) {
       console.warn('[onward] suggestRequirements failed:', e.message);
     }
   }
-  return fallbackSuggestions(entries, askAtEnd);
+
+  const llmHasText = Boolean(llm && llm.text);
+  const typedPart = typed.length > 0
+    ? fallbackSuggestions(typed, askAtEnd, !llmHasText)
+    : { text: '', per_goal: [] };
+
+  const text = [typedPart.text, llmHasText ? llm.text : ''].filter(Boolean).join(' ');
+  return { text, per_goal: [...typedPart.per_goal, ...(llm?.per_goal ?? [])] };
 }
 
 // Used when the LLM is off or slow: only goals with a template have anything
 // to say.
-function fallbackSuggestions(entries, askAtEnd = true) {
+function lcFirst(label) {
+  // "Proof of residence" -> "proof of residence", but leave "ID card" alone.
+  return /^[A-Z][a-z]/.test(label) ? label[0].toLowerCase() + label.slice(1) : label;
+}
+
+function fallbackSuggestions(entries, askAtEnd = true, withClosing = true) {
   const perGoal = [];
   const bits = [];
   for (const e of entries) {
@@ -1186,13 +1209,21 @@ function fallbackSuggestions(entries, askAtEnd = true) {
       items: picked.map((p) => ({ label: p.label, kind: p.kind })),
     });
     if (picked.length > 0) {
+      const list = joinWithAnd(picked.map((p) => lcFirst(p.label)));
       bits.push(
-        `For ${e.goal.title}, you'll probably want ${joinWithAnd(picked.map((p) => p.label))}.`
+        pick([
+          `For ${e.goal.title}, you'll probably need ${list}.`,
+          `You'll most likely need ${list} for ${e.goal.title}.`,
+        ])
       );
     }
   }
   if (bits.length === 0) return { text: '', per_goal: perGoal };
-  const closing = askAtEnd ? ' Want me to add those?' : " I can add those too.";
+  const closing = !withClosing
+    ? ''
+    : askAtEnd
+      ? pick([' Want me to add those?', ' Should I add those for you?'])
+      : ' I can add those too.';
   return { text: bits.join(' ') + closing, per_goal: perGoal };
 }
 
@@ -1280,13 +1311,13 @@ function composeCreatedLine(created, today, defaultedTitles = [], dupes = []) {
     );
   } else if (created.length > 1) {
     const list = created.map(
-      (c) =>
-        `${c.goal.title} (${friendlyDate(c.goal.deadline, today, readTimeTag(c.goal.context))}${taskCountText(c, true)})`
+      (c) => `${c.goal.title} for ${friendlyDate(c.goal.deadline, today, readTimeTag(c.goal.context))}`
     );
     parts.push(
       pick([
         `Okay, I've added ${joinWithAnd(list)}.`,
         `Got it. That's ${joinWithAnd(list)}.`,
+        `Done. I've got ${joinWithAnd(list)}.`,
       ])
     );
   }
@@ -1822,13 +1853,21 @@ async function doUpdateItem(action, rawText) {
     messageParts.push(renderLateOptions(lateReason.label, req.depends_on ?? null));
   }
 
-  const session = await getSession();
-  await saveSession({
-    pendingConfirmation: null,
-    pendingFlag: flag,
-    activeGoalId: goal.id,
-  });
-  void session;
+  // The status change above already landed in the DB. A failure in this
+  // bookkeeping step must never turn an already-successful, already-composed
+  // reply into a reported failure — that's what previously made the app say
+  // "something went wrong, try again" (which the frontend then resent) for a
+  // turn that had, in fact, already applied the change.
+  try {
+    await getSession();
+    await saveSession({
+      pendingConfirmation: null,
+      pendingFlag: flag,
+      activeGoalId: goal.id,
+    });
+  } catch (e) {
+    console.error('[onward] doUpdateItem: session save failed after requirement was already updated:', e);
+  }
 
   return {
     intent: 'update',
@@ -1977,11 +2016,18 @@ async function doUpdateItems(action, rawText) {
     lastGoalId = goalId;
   }
 
-  await saveSession({
-    pendingConfirmation: null,
-    pendingFlag: lastFlag,
-    activeGoalId: lastGoalId,
-  });
+  // Same reasoning as doUpdateItem: every update in `applied` above already
+  // landed in the DB. A failure saving session bookkeeping must not turn
+  // those already-applied changes into a reported failure.
+  try {
+    await saveSession({
+      pendingConfirmation: null,
+      pendingFlag: lastFlag,
+      activeGoalId: lastGoalId,
+    });
+  } catch (e) {
+    console.error('[onward] doUpdateItems: session save failed after requirements were already updated:', e);
+  }
 
   const message = composeUpdateItemsReply(applied, failed);
 
@@ -2152,9 +2198,7 @@ async function doConfirmedDeleteGoal(action, rawText) {
 
   // Actually delete: requirements first, then the goal itself, so the
   // goal never outlives its items even if this is interrupted.
-  for (const r of beforeReqs) {
-    await deleteRequirement(r.id);
-  }
+  await deleteRequirements(beforeReqs.map((r) => r.id));
   await deleteGoal(goal_id);
 
   pushUndo(title, async () => {
@@ -3224,7 +3268,7 @@ function statusLine(label, status, dependsOn) {
     case 'waiting_on_other':
       return dependsOn
         ? pick([`Okay, ${label} is with ${dependsOn} now.`, `Got it, waiting on ${dependsOn} for ${label}.`])
-        : pick([`Okay, you're waiting to hear back on ${label}.`, `Got it, ${label} is out of your hands for now.`]);
+        : pick([`Okay, I've marked ${label} as waiting.`, `Got it, you're waiting to hear back on ${label}.`]);
     case 'not_started':
       return `Okay, ${label} is back on the to-do list.`;
     default:

@@ -32,6 +32,102 @@ function unwrap({ data, error }, context) {
 }
 
 // ---------------------------------------------------------------------------
+// Read cache
+//
+// Every read here is a round trip to a remote Supabase project, and one turn
+// makes several of them. Reads are cached in memory and kept current by the
+// writes in this module. A short TTL covers edits made outside the process
+// (e.g. in the Supabase dashboard).
+// ---------------------------------------------------------------------------
+
+const READ_TTL_MS = 30_000;
+const TEMPLATE_TTL_MS = 5 * 60_000;
+
+const readCache = new Map();
+
+function clone(v) {
+  return v === undefined || v === null ? v : structuredClone(v);
+}
+
+async function cached(key, ttlMs, loader) {
+  const hit = readCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return clone(hit.value);
+  const value = await loader();
+  readCache.set(key, { at: Date.now(), value: clone(value) });
+  return value;
+}
+
+function bust() {
+  readCache.clear();
+}
+
+// Cache layout
+//   goals:<status|all>   list of goals
+//   goal:<id>            one goal
+//   reqs:<goalId>        every requirement of one goal
+// Writes update these entries in place (write-through), so the next turn
+// reads from memory instead of paying for another round trip.
+
+function fresh(entry) {
+  return entry && Date.now() - entry.at < READ_TTL_MS;
+}
+
+function dropKeys(prefix) {
+  for (const key of [...readCache.keys()]) {
+    if (key.startsWith(prefix)) readCache.delete(key);
+  }
+}
+
+function mutateReqList(goalId, fn) {
+  const e = readCache.get(`reqs:${goalId}`);
+  if (fresh(e)) e.value = fn(e.value);
+}
+
+function patchCachedRequirement(id, partial) {
+  if (!partial) return;
+  for (const [key, e] of readCache) {
+    if (key.startsWith('reqs:') && Array.isArray(e.value) && e.value.some((r) => r && r.id === id)) {
+      e.value = e.value.map((r) => (r && r.id === id ? { ...r, ...partial } : r));
+    }
+  }
+}
+
+function removeCachedRequirements(ids) {
+  const drop = new Set(ids);
+  for (const [key, e] of readCache) {
+    if (key.startsWith('reqs:') && Array.isArray(e.value)) {
+      e.value = e.value.filter((r) => !(r && drop.has(r.id)));
+    }
+  }
+}
+
+function patchCachedGoal(id, partial) {
+  if (!partial) return;
+  const g = readCache.get(`goal:${id}`);
+  if (g && g.value) g.value = { ...g.value, ...partial };
+  for (const [key, e] of readCache) {
+    if (key.startsWith('goals:') && Array.isArray(e.value)) {
+      e.value = e.value.map((x) => (x && x.id === id ? { ...x, ...partial } : x));
+    }
+  }
+}
+
+// Writes that nothing waits on (audit log, session bookkeeping) run in the
+// background, in order. Reads of the same data call flushQueue() first.
+let writeQueue = Promise.resolve();
+
+function queueWrite(label, fn) {
+  writeQueue = writeQueue
+    .then(fn)
+    .catch((e) => console.warn(`[onward/db] background ${label} failed:`, e.message));
+  return writeQueue;
+}
+
+function flushQueue() {
+  return writeQueue;
+}
+
+// ---------------------------------------------------------------------------
 // Inline sanitizers for requirement rows.
 //
 // These are duplicated deliberately from services/requirementService.js and
@@ -57,7 +153,7 @@ function sanitizeStatus(raw, fallback = 'not_started') {
 // Goal
 // ---------------------------------------------------------------------------
 
-export async function createGoal({
+async function createGoalRaw({
   title,
   deadline,
   goalType = null,
@@ -81,22 +177,26 @@ export async function createGoal({
 }
 
 export async function getGoal(goalId) {
-  return unwrap(
-    await supabase.from('Goal').select('*').eq('id', goalId).maybeSingle(),
-    'getGoal'
-  );
+  return cached(`goal:${goalId}`, READ_TTL_MS, async () => {
+    return unwrap(
+      await supabase.from('Goal').select('*').eq('id', goalId).maybeSingle(),
+      'getGoal'
+    );
+  });
 }
 
 export async function listGoals({ status = null } = {}) {
-  let query = supabase
-    .from('Goal')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (status) query = query.eq('status', status);
-  return unwrap(await query, 'listGoals');
+  return cached(`goals:${status ?? 'all'}`, READ_TTL_MS, async () => {
+    let query = supabase
+      .from('Goal')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (status) query = query.eq('status', status);
+    return unwrap(await query, 'listGoals');
+  });
 }
 
-export async function updateGoal(goalId, patch) {
+async function updateGoalRaw(goalId, patch) {
   return unwrap(
     await supabase
       .from('Goal')
@@ -108,7 +208,7 @@ export async function updateGoal(goalId, patch) {
   );
 }
 
-export async function deleteGoal(goalId) {
+async function deleteGoalRaw(goalId) {
   return unwrap(
     await supabase.from('Goal').delete().eq('id', goalId),
     'deleteGoal'
@@ -119,7 +219,7 @@ export async function deleteGoal(goalId) {
 // Requirement
 // ---------------------------------------------------------------------------
 
-export async function createRequirement({
+async function createRequirementRaw({
   goalId,
   label,
   kind,
@@ -163,7 +263,7 @@ export async function createRequirement({
  * Sanitizes kind and status inline before building rows, so a bad value
  * from the LLM or a service never reaches the database constraint.
  */
-export async function createRequirementsBatch(goalId, items) {
+async function createRequirementsBatchRaw(goalId, items) {
   if (!Array.isArray(items) || items.length === 0) return [];
 
   const rows = items.map((it) => ({
@@ -193,6 +293,12 @@ export async function createRequirementsBatch(goalId, items) {
 }
 
 export async function getRequirement(requirementId) {
+  for (const [key, e] of readCache) {
+    if (key.startsWith('reqs:') && fresh(e) && Array.isArray(e.value)) {
+      const hit = e.value.find((r) => r && r.id === requirementId);
+      if (hit) return clone(hit);
+    }
+  }
   return unwrap(
     await supabase
       .from('Requirement')
@@ -204,7 +310,9 @@ export async function getRequirement(requirementId) {
 }
 
 export async function listRequirementsForGoal(goalId) {
-  return unwrap(
+  const hit = readCache.get(`reqs:${goalId}`);
+  if (fresh(hit)) return clone(hit.value);
+  const rows = unwrap(
     await supabase
       .from('Requirement')
       .select('*')
@@ -212,26 +320,51 @@ export async function listRequirementsForGoal(goalId) {
       .order('created_at', { ascending: true }),
     'listRequirementsForGoal'
   );
+  readCache.set(`reqs:${goalId}`, { at: Date.now(), value: clone(rows) });
+  return rows;
 }
 
 /**
- * Batch version of listRequirementsForGoal. One query for many goals.
+ * Batch version of listRequirementsForGoal. Goals already in the cache are
+ * served from memory; the rest are fetched in one query.
  * Returns [] for an empty input without touching the database.
  */
 export async function listRequirementsForGoals(goalIds) {
   if (!Array.isArray(goalIds) || goalIds.length === 0) return [];
 
-  return unwrap(
-    await supabase
-      .from('Requirement')
-      .select('*')
-      .in('goal_id', goalIds)
-      .order('created_at', { ascending: true }),
-    'listRequirementsForGoals'
-  );
+  const out = [];
+  const missing = [];
+  for (const id of goalIds) {
+    const hit = readCache.get(`reqs:${id}`);
+    if (fresh(hit)) out.push(...hit.value);
+    else missing.push(id);
+  }
+
+  if (missing.length > 0) {
+    const rows = unwrap(
+      await supabase
+        .from('Requirement')
+        .select('*')
+        .in('goal_id', missing)
+        .order('created_at', { ascending: true }),
+      'listRequirementsForGoals'
+    );
+    const byGoal = new Map(missing.map((id) => [id, []]));
+    for (const r of rows) {
+      if (!byGoal.has(r.goal_id)) byGoal.set(r.goal_id, []);
+      byGoal.get(r.goal_id).push(r);
+    }
+    for (const [id, list] of byGoal) {
+      readCache.set(`reqs:${id}`, { at: Date.now(), value: clone(list) });
+    }
+    out.push(...rows);
+  }
+
+  out.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+  return clone(out);
 }
 
-export async function updateRequirement(requirementId, patch) {
+async function updateRequirementRaw(requirementId, patch) {
   return unwrap(
     await supabase
       .from('Requirement')
@@ -243,7 +376,15 @@ export async function updateRequirement(requirementId, patch) {
   );
 }
 
-export async function deleteRequirement(requirementId) {
+async function deleteRequirementsRaw(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return null;
+  return unwrap(
+    await supabase.from('Requirement').delete().in('id', ids),
+    'deleteRequirements'
+  );
+}
+
+async function deleteRequirementRaw(requirementId) {
   return unwrap(
     await supabase.from('Requirement').delete().eq('id', requirementId),
     'deleteRequirement'
@@ -254,7 +395,7 @@ export async function deleteRequirement(requirementId) {
 // Event (append-only log)
 // ---------------------------------------------------------------------------
 
-export async function appendEvent({
+async function appendEventRaw({
   goalId,
   requirementId = null,
   rawText = null,
@@ -278,7 +419,7 @@ export async function appendEvent({
 /**
  * Batch version of appendEvent. Inserts all rows in one round trip.
  */
-export async function appendEventsBatch(events) {
+async function appendEventsBatchRaw(events) {
   if (!Array.isArray(events) || events.length === 0) return [];
 
   const rows = events.map((e) => ({
@@ -298,6 +439,7 @@ export async function appendEventsBatch(events) {
 }
 
 export async function listEventsForGoal(goalId, { limit = 100 } = {}) {
+  await flushQueue();
   return unwrap(
     await supabase
       .from('Event')
@@ -310,6 +452,7 @@ export async function listEventsForGoal(goalId, { limit = 100 } = {}) {
 }
 
 export async function listEventsForRequirement(requirementId) {
+  await flushQueue();
   return unwrap(
     await supabase
       .from('Event')
@@ -348,21 +491,25 @@ export async function createGoalTypeTemplate({
 }
 
 export async function listGoalTypeTemplates(goalType) {
-  return unwrap(
-    await supabase
-      .from('GoalTypeTemplate')
-      .select('*')
-      .eq('goal_type', goalType),
-    'listGoalTypeTemplates'
-  );
+  return cached(`tpl:${goalType}`, TEMPLATE_TTL_MS, async () => {
+    return unwrap(
+      await supabase
+        .from('GoalTypeTemplate')
+        .select('*')
+        .eq('goal_type', goalType),
+      'listGoalTypeTemplates'
+    );
+  });
 }
 
 export async function listAllGoalTypeNames() {
-  const rows = unwrap(
-    await supabase.from('GoalTypeTemplate').select('goal_type'),
-    'listAllGoalTypeNames'
-  );
-  return [...new Set(rows.map((r) => r.goal_type))];
+  return cached('tplNames', TEMPLATE_TTL_MS, async () => {
+    const rows = unwrap(
+      await supabase.from('GoalTypeTemplate').select('goal_type'),
+      'listAllGoalTypeNames'
+    );
+    return [...new Set(rows.map((r) => r.goal_type))];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +633,39 @@ export async function saveSession({
     }
   }
 
+  // Warm cache: update it now and write to the database in the background.
+  // Nothing in the reply depends on this write landing first.
+  if (sessionCache) {
+    const optimistic = {
+      ...sessionCache,
+      pending_confirmation: pendingConfirmation,
+      pending_flag: pendingFlag,
+      active_goal_id: activeGoalId,
+      updated_at: new Date().toISOString(),
+    };
+    sessionCache = optimistic;
+    queueWrite('saveSession', async () =>
+      unwrap(
+        await supabase
+          .from('Session')
+          .upsert(
+            {
+              id: SESSION_ID,
+              pending_confirmation: pendingConfirmation,
+              pending_flag: pendingFlag,
+              active_goal_id: activeGoalId,
+              updated_at: optimistic.updated_at,
+            },
+            { onConflict: 'id' }
+          )
+          .select()
+          .single(),
+        'saveSession'
+      )
+    );
+    return optimistic;
+  }
+
   const updated = unwrap(
     await supabase
       .from('Session')
@@ -586,4 +766,132 @@ function sortByCreatedAtThenInputOrder(rows, rawRows, inputItems) {
     const ib = preferred.get(orderKey(b.label, b.kind)) ?? Number.MAX_SAFE_INTEGER;
     return ia - ib;
   });
+}
+export async function createGoal(...args) {
+  try {
+    const row = await createGoalRaw(...args);
+    readCache.set(`goal:${row.id}`, { at: Date.now(), value: clone(row) });
+    readCache.set(`reqs:${row.id}`, { at: Date.now(), value: [] });
+    for (const [key, e] of readCache) {
+      if (!key.startsWith('goals:') || !Array.isArray(e.value)) continue;
+      if (key === 'goals:all' || key === `goals:${row.status}`) e.value = [clone(row), ...e.value];
+    }
+    return row;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function updateGoal(goalId, patch) {
+  patchCachedGoal(goalId, patch);
+  try {
+    const row = await updateGoalRaw(goalId, patch);
+    const { status, ...rest } = row ?? {};
+    if (patch && 'status' in patch) {
+      // The goal may have moved between status lists. Refetch the lists only.
+      dropKeys('goals:');
+      patchCachedGoal(goalId, row);
+    } else {
+      patchCachedGoal(goalId, rest);
+    }
+    return row;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function deleteGoal(goalId) {
+  try {
+    const r = await deleteGoalRaw(goalId);
+    readCache.delete(`goal:${goalId}`);
+    readCache.delete(`reqs:${goalId}`);
+    for (const [key, e] of readCache) {
+      if (key.startsWith('goals:') && Array.isArray(e.value)) {
+        e.value = e.value.filter((g) => !(g && g.id === goalId));
+      }
+    }
+    return r;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function createRequirement(...args) {
+  try {
+    const row = await createRequirementRaw(...args);
+    if (row && row.goal_id) mutateReqList(row.goal_id, (list) => [...list, clone(row)]);
+    return row;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function createRequirementsBatch(...args) {
+  try {
+    const rows = await createRequirementsBatchRaw(...args);
+    for (const row of rows) {
+      if (row && row.goal_id) mutateReqList(row.goal_id, (list) => [...list, clone(row)]);
+    }
+    return rows;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function updateRequirement(requirementId, patch) {
+  const moves = patch && 'goal_id' in patch;
+  if (moves) dropKeys('reqs:');
+  else patchCachedRequirement(requirementId, patch);
+  try {
+    const row = await updateRequirementRaw(requirementId, patch);
+    if (moves) {
+      dropKeys('reqs:');
+    } else {
+      const { goal_id, ...rest } = row ?? {};
+      patchCachedRequirement(requirementId, rest);
+    }
+    return row;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export async function deleteRequirement(requirementId) {
+  try {
+    const r = await deleteRequirementRaw(requirementId);
+    removeCachedRequirements([requirementId]);
+    return r;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+// One query for many requirements (used when deleting a whole goal).
+export async function deleteRequirements(ids) {
+  try {
+    const r = await deleteRequirementsRaw(ids);
+    removeCachedRequirements(ids);
+    return r;
+  } catch (e) {
+    bust();
+    throw e;
+  }
+}
+
+export function appendEvent(args) {
+  queueWrite('appendEvent', () => appendEventRaw(args));
+  return Promise.resolve(null);
+}
+
+export function appendEventsBatch(events) {
+  if (!Array.isArray(events) || events.length === 0) return Promise.resolve([]);
+  queueWrite('appendEventsBatch', () => appendEventsBatchRaw(events));
+  return Promise.resolve([]);
 }

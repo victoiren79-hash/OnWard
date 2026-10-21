@@ -30,6 +30,7 @@ import {
   deleteRequirement,
   getSession,
 } from './db.js';
+import axios from 'axios';
 import { getSendFollowupTool } from './services/actionExecutor.js';
 import { readTimeTag, writeTimeTag } from './services/conversation.js';
 
@@ -412,6 +413,91 @@ async function handleMcpRequest(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// Text to speech
+//
+// POST /tts { text } -> audio/wav, spoken with Groq's Orpheus voice. If it is
+// switched off, rate limited, or the model terms haven't been accepted yet,
+// this answers 503 and the browser falls back to its own voice.
+// ---------------------------------------------------------------------------
+
+const TTS_MODEL = process.env.GROQ_TTS_MODEL ?? 'canopylabs/orpheus-v1-english';
+const TTS_VOICE = process.env.GROQ_TTS_VOICE ?? 'hannah';
+const TTS_ENABLED = (process.env.GROQ_TTS ?? 'on').toLowerCase() !== 'off';
+const TTS_MAX_CHARS = 220;
+let ttsBlockedUntil = 0;
+let ttsWarned = false;
+const ttsCache = new Map();
+
+function readBody(req, limit = 8192) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => {
+      data += c;
+      if (data.length > limit) { reject(new Error('body too large')); req.destroy(); }
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+function ttsFail(res, code, message) {
+  res.writeHead(code, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: message }));
+}
+
+async function handleTts(req, res) {
+  let text = '';
+  try {
+    const body = JSON.parse((await readBody(req)) || '{}');
+    text = String(body.text ?? '').replace(/\s+/g, ' ').trim().slice(0, TTS_MAX_CHARS);
+  } catch {
+    return ttsFail(res, 400, 'bad request');
+  }
+  if (!text) return ttsFail(res, 400, 'no text');
+  if (!TTS_ENABLED || Date.now() < ttsBlockedUntil || !process.env.GROQ_API_KEY) {
+    return ttsFail(res, 503, 'tts unavailable');
+  }
+
+  const hit = ttsCache.get(text);
+  if (hit) {
+    res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+    return res.end(hit);
+  }
+
+  const t0 = Date.now();
+  try {
+    const r = await axios.post(
+      'https://api.groq.com/openai/v1/audio/speech',
+      { model: TTS_MODEL, voice: TTS_VOICE, input: text, response_format: 'wav' },
+      {
+        headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+        responseType: 'arraybuffer',
+        timeout: 8000,
+      }
+    );
+    const buf = Buffer.from(r.data);
+    ttsCache.set(text, buf);
+    if (ttsCache.size > 60) ttsCache.delete(ttsCache.keys().next().value);
+    console.error(`[onward/tts] ${TTS_VOICE} ${text.length} chars ${Date.now() - t0}ms`);
+    res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+    return res.end(buf);
+  } catch (e) {
+    const status = e?.response?.status ?? null;
+    let detail = e.message;
+    try { detail = Buffer.from(e.response.data).toString('utf8').slice(0, 300); } catch { /* keep message */ }
+    // 429: back off briefly. 400/401/403/404: usually model terms not accepted
+    // or no access, so stop trying for a while.
+    if (status === 429) ttsBlockedUntil = Date.now() + 60_000;
+    else if ([400, 401, 403, 404].includes(status)) ttsBlockedUntil = Date.now() + 10 * 60_000;
+    if (!ttsWarned || status === 429) {
+      ttsWarned = true;
+      console.warn(`[onward/tts] failed (${status ?? 'no status'}): ${detail}. Using the browser voice instead.`);
+    }
+    return ttsFail(res, 503, 'tts unavailable');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP server
 // ---------------------------------------------------------------------------
 
@@ -420,6 +506,10 @@ const PORT = Number(process.env.PORT ?? 3000);
 const httpServer = http.createServer(async (req, res) => {
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
     return serveIndex(res);
+  }
+
+  if (req.method === 'POST' && req.url === '/tts') {
+    return handleTts(req, res);
   }
 
   if (req.method === 'POST' && req.url === '/demo/advance') {
@@ -464,6 +554,7 @@ httpServer.listen(PORT, () => {
   console.error(`[onward] listening on http://localhost:${PORT}`);
   console.error(`[onward]   frontend:  http://localhost:${PORT}/`);
   console.error(`[onward]   MCP:       http://localhost:${PORT}/mcp`);
+  console.error(`[onward]   voice:     ${TTS_ENABLED ? `Groq ${TTS_MODEL} (${TTS_VOICE})` : 'browser voice only'}`);
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/advance`);
   console.error(`[onward]   demo:      POST http://localhost:${PORT}/demo/reset`);
   console.error(`[onward]   demo:      GET  http://localhost:${PORT}/demo/pending-flag`);

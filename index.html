@@ -3,50 +3,50 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Onward — for the things that depend on other people</title>
+<title>Onward</title>
 <style>
   :root {
-    /* Light, calm, indigo-accented palette */
-    --bg:            #f5f6fa;
-    --bg-2:          #ffffff;
-    --bg-3:          #f0f1f7;
-    --bg-4:          #e8eaf3;
-    --surface:       #ffffff;
-    --surface-2:     #f9fafc;
+    /* Dark, Echo-inspired palette with a cyan accent */
+    --bg:            #060a17;
+    --bg-2:          #0b1124;
+    --bg-3:          #111933;
+    --bg-4:          #18224a;
+    --surface:       #0e1530;
+    --surface-2:     #131c3b;
 
-    --text:          #0f1222;
-    --text-dim:      #5b6079;
-    --text-mute:     #8a90a6;
+    --text:          #eaf0ff;
+    --text-dim:      #a9b4d6;
+    --text-mute:     #7886ad;
 
-    --accent:        #5b5bff;
-    --accent-dim:    #4444d6;
-    --accent-glow:   rgba(91, 91, 255, 0.24);
-    --accent-soft:   rgba(91, 91, 255, 0.10);
-    --accent-softer: rgba(91, 91, 255, 0.06);
+    --accent:        #19cdfc;
+    --accent-dim:    #0fa9d3;
+    --accent-glow:   rgba(25, 205, 252, 0.30);
+    --accent-soft:   rgba(25, 205, 252, 0.13);
+    --accent-softer: rgba(25, 205, 252, 0.07);
 
-    --ok:            #22b573;
-    --ok-soft:       rgba(34, 181, 115, 0.12);
-    --warn:          #e8a23c;
-    --warn-soft:     rgba(232, 162, 60, 0.14);
+    --ok:            #2ee59d;
+    --ok-soft:       rgba(46, 229, 157, 0.14);
+    --warn:          #ffb547;
+    --warn-soft:     rgba(255, 181, 71, 0.16);
 
-    --border:        #e5e7ee;
-    --border-2:      #eceef4;
+    --border:        #1f2b52;
+    --border-2:      #18224a;
 
-    --user-bg:       #5b5bff;
-    --user-text:     #ffffff;
+    --user-bg:       #19cdfc;
+    --user-text:     #04101f;
 
-    --reminder-bg:   #eef0ff;
-    --reminder-bord: #d5d8ff;
-    --reminder-text: #2a2c5e;
+    --reminder-bg:   #1a2244;
+    --reminder-bord: #2c386e;
+    --reminder-text: #eaf0ff;
 
     --radius-sm:     8px;
     --radius-md:     14px;
     --radius-lg:     20px;
     --radius-pill:   999px;
 
-    --shadow-sm:     0 1px 2px rgba(15, 18, 34, 0.05);
-    --shadow-md:     0 2px 8px rgba(15, 18, 34, 0.06);
-    --shadow-lg:     0 8px 28px rgba(15, 18, 34, 0.08);
+    --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md:     0 2px 10px rgba(0, 0, 0, 0.40);
+    --shadow-lg:     0 8px 28px rgba(0, 0, 0, 0.45);
   }
 
   * { box-sizing: border-box; }
@@ -64,11 +64,11 @@
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(15, 18, 34, 0.10);
+    background: rgba(255, 255, 255, 0.12);
     border-radius: var(--radius-pill);
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(15, 18, 34, 0.18); }
-  * { scrollbar-color: rgba(15, 18, 34, 0.10) transparent; scrollbar-width: thin; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+  * { scrollbar-color: rgba(255, 255, 255, 0.12) transparent; scrollbar-width: thin; }
 
   #app { display: flex; height: 100vh; }
 
@@ -619,16 +619,212 @@
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+
+  /* ---------------------------------------------------------------------
+     Voice stage (replaces the chat column)
+     --------------------------------------------------------------------- */
+  #stage {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+    background:
+      radial-gradient(ellipse at 50% 38%, rgba(25,205,252,0.10), transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(106,92,255,0.10), transparent 60%),
+      var(--bg);
+  }
+  #stage header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px 14px;
+  }
+  #stage header .title { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+  #stage header .subtitle { font-size: 12px; color: var(--text-mute); margin-top: 2px; }
+  #stage header .status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+  #stage header .status .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ok); box-shadow: 0 0 8px rgba(46,229,157,0.5);
+  }
+  #stage #flag-banner { margin: 8px 28px 0; }
+
+  #orb-wrap {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 32px 28px;
+    min-height: 0;
+  }
+
+  /* The orb itself (plus its label and captions) is centered in whatever
+     space is left after the suggestion chips and support note below it,
+     instead of the old behavior where justify-content:center balanced the
+     WHOLE stack (orb + chips + note) and the chips' height dragged the orb
+     up above true center. */
+  .orb-center {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    width: 100%;
+    min-height: 0;
+  }
+
+  #chips, #support-note {
+    flex: 0 0 auto;
+  }
+
+  #orb {
+    position: relative;
+    width: 230px;
+    height: 230px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #orb:focus-visible { box-shadow: 0 0 0 3px var(--accent-glow); }
+  #orb .ring, #orb .halo, #orb .core { position: absolute; border-radius: 50%; }
+
+  #orb .ring {
+    inset: 0;
+    border: 7px solid rgba(25, 205, 252, 0.28);
+    box-shadow: 0 0 46px rgba(25,205,252,0.16), inset 0 0 40px rgba(25,205,252,0.10);
+    transition: border-color 0.35s ease, box-shadow 0.35s ease;
+  }
+  #orb .halo {
+    inset: 0;
+    border: 2px solid rgba(25, 205, 252, 0.0);
+    opacity: 0;
+  }
+  #orb .core {
+    inset: 38px;
+    background: radial-gradient(circle at 50% 38%, rgba(25,205,252,0.20), rgba(25,205,252,0.03) 72%);
+    transition: opacity 0.3s ease;
+  }
+
+  /* listening: bright steady ring with a soft breathing glow and ripples */
+  body[data-state="listening"] #orb .ring {
+    border-color: var(--accent);
+    box-shadow: 0 0 70px rgba(25,205,252,0.65), inset 0 0 55px rgba(25,205,252,0.38);
+    animation: breathe 1.5s ease-in-out infinite;
+  }
+  body[data-state="listening"] #orb .halo { animation: ripple 1.9s ease-out infinite; }
+  body[data-state="listening"] #orb .halo.h2 { animation-delay: 0.95s; }
+
+  /* thinking: a bright arc travels around the ring */
+  body[data-state="thinking"] #orb .ring {
+    border-color: rgba(25,205,252,0.18);
+    border-top-color: var(--accent);
+    border-right-color: #6a5cff;
+    box-shadow: 0 0 40px rgba(25,205,252,0.25);
+    animation: spin 0.95s linear infinite;
+  }
+  body[data-state="thinking"] #orb .core { opacity: 0.55; }
+
+  /* speaking: the whole ring pulses like it is talking */
+  body[data-state="speaking"] #orb .ring {
+    border-color: var(--accent);
+    box-shadow: 0 0 80px rgba(25,205,252,0.7), inset 0 0 60px rgba(25,205,252,0.45);
+    animation: talk 0.62s ease-in-out infinite alternate;
+  }
+  body[data-state="speaking"] #orb .core { animation: talkcore 0.62s ease-in-out infinite alternate; }
+
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+  @keyframes ripple {
+    0%   { transform: scale(1);    opacity: 0.55; border-color: rgba(25,205,252,0.7); }
+    100% { transform: scale(1.55); opacity: 0;    border-color: rgba(25,205,252,0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes talk { from { transform: scale(0.985); } to { transform: scale(1.06); } }
+  @keyframes talkcore { from { opacity: 0.5; transform: scale(0.94); } to { opacity: 1; transform: scale(1.04); } }
+
+  #state-label {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    min-height: 18px;
+  }
+  body[data-state="listening"] #state-label { color: var(--accent); }
+
+  /* Bounded + scrollable instead of growing freely: a long reply (e.g. a
+     briefing) used to force this flex item past its allotted space, and
+     because the container's justify-content:center split that overflow
+     evenly above and below, the text bled down over the chips. Capping
+     the height and scrolling internally keeps the rest of the layout put. */
+  #captions {
+    width: min(640px, 100%);
+    min-height: 90px;
+    max-height: 46vh;
+    overflow-y: auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 6px 2px 2px;
+  }
+  #heard { font-size: 13px; color: var(--text-mute); min-height: 20px; }
+  #reply {
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text);
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    white-space: pre-line;
+    text-align: left;
+  }
+  #reply.show { opacity: 1; transform: none; }
+  #reply.error { color: #ff8a8a; }
+  /* A short reply (one line, no wrap) still reads better centered than
+     left-stuck; only multi-line replies benefit from left alignment. */
+  #reply:not(.multiline) { text-align: center; }
+
+  #chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    max-width: 640px;
+  }
+  #chips .lead { width: 100%; text-align: center; font-size: 12px; color: var(--text-mute); margin-bottom: 2px; }
+  #chips span.chip {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    border-radius: var(--radius-pill);
+    padding: 6px 12px;
+  }
+  body:not([data-state="idle"]) #chips { opacity: 0.35; }
+  #chips { transition: opacity 0.3s ease; }
+
+  #support-note { color: var(--warn); font-size: 13px; text-align: center; min-height: 18px; }
+
+  .goal.flash { animation: goalflash 1.6s ease-out; }
+  @keyframes goalflash {
+    0%   { box-shadow: 0 0 0 3px var(--accent); background: var(--accent-soft); }
+    100% { box-shadow: var(--shadow-sm); }
+  }
 </style>
 </head>
 <body>
 <div id="app">
 
-  <section id="chat">
+  <section id="stage">
     <header>
       <div>
         <div class="title">Onward</div>
-        <div class="subtitle">for the things that depend on other people</div>
+        <div class="subtitle">One last thing you have to hold in your head</div>
       </div>
       <div class="status">
         <span class="dot" aria-hidden="true"></span>
@@ -646,19 +842,29 @@
       </div>
     </div>
 
-    <div id="messages">
-      <div class="row sys intro">
-        <div class="avatar">O</div>
-        <div class="bubble">
-          Hi! I'm Onward. Tell me what you're trying to get done, and when it's due. I'll help you keep track of what's needed, what's still pending, and what needs your attention — so nothing important slips through the cracks.
+    <div id="orb-wrap">
+      <div class="orb-center">
+        <button id="orb" type="button" aria-label="Talk to Onward">
+          <span class="halo h1"></span>
+          <span class="halo h2"></span>
+          <span class="ring"></span>
+          <span class="core"></span>
+        </button>
+        <div id="state-label">Tap to talk</div>
+        <div id="captions" aria-live="polite">
+          <div id="heard"></div>
+          <div id="reply"></div>
         </div>
       </div>
+      <div id="chips">
+        <div class="lead">Try saying</div>
+        <span class="chip">I need to renew my passport by October 30</span>
+        <span class="chip">Just received the vaccination records</span>
+        <span class="chip">What's left to do?</span>
+        <span class="chip">I asked my landlord for the proof of residence</span>
+      </div>
+      <div id="support-note"></div>
     </div>
-
-    <form id="composer">
-      <textarea id="input" rows="1" placeholder="Tell me what you're working toward…"></textarea>
-      <button id="send" type="submit" aria-label="Send">↑</button>
-    </form>
   </section>
 
   <aside id="sidebar">
@@ -754,10 +960,6 @@ async function fetchPendingFlag() {
   } finally { clearTimeout(timer); }
 }
 
-const $messages = document.getElementById('messages');
-const $input = document.getElementById('input');
-const $send = document.getElementById('send');
-const $composer = document.getElementById('composer');
 const $goals = document.getElementById('goals');
 const $refresh = document.getElementById('refresh');
 const $clock = document.getElementById('clock');
@@ -787,54 +989,6 @@ $flagDismiss.addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Message rendering
-// ---------------------------------------------------------------------------
-
-function addMessage(kind, text, meta) {
-  const row = document.createElement('div');
-  row.className = `row ${kind}`;
-
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = kind === 'user' ? '·' : 'O';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = text;
-  if (meta) {
-    const m = document.createElement('div');
-    m.className = 'meta';
-    m.textContent = meta;
-    bubble.appendChild(m);
-  }
-
-  if (kind === 'user') {
-    row.appendChild(bubble);
-    row.appendChild(avatar);
-  } else {
-    row.appendChild(avatar);
-    row.appendChild(bubble);
-  }
-
-  $messages.appendChild(row);
-  $messages.scrollTop = $messages.scrollHeight;
-  return row;
-}
-
-function resolvePending(rowEl, kind, text, meta) {
-  rowEl.className = `row ${kind}`;
-  const bubble = rowEl.querySelector('.bubble');
-  bubble.textContent = text;
-  if (meta) {
-    const m = document.createElement('div');
-    m.className = 'meta';
-    m.textContent = meta;
-    bubble.appendChild(m);
-  }
-  $messages.scrollTop = $messages.scrollHeight;
-}
-
-// ---------------------------------------------------------------------------
 // Clock label
 // ---------------------------------------------------------------------------
 
@@ -852,94 +1006,6 @@ function updateClockLabel(result) {
 }
 
 // ---------------------------------------------------------------------------
-// Composer
-// ---------------------------------------------------------------------------
-
-$composer.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = $input.value.trim();
-  if (!text) return;
-  $input.value = '';
-  $input.style.height = 'auto';
-  $send.disabled = true;
-  addMessage('user', text);
-  const pending = addMessage('thinking', 'Thinking');
-
-  try {
-    const response = await sendStatementWithRetry(text);
-
-    if (response && response.__retried) {
-      // The retry succeeded — the bubble has already been updated to
-      // "retrying..." by sendStatementWithRetry. Just replace its text.
-    }
-
-    const message = response?.message ?? '(no message)';
-    resolvePending(pending, 'sys', message, null);
-
-    if (response?.proactive_flag) {
-      showFlagBanner(response.proactive_flag);
-    }
-
-    // Fire-and-forget sidebar refresh. Do not block on this.
-    const touchedGoalId = pickTouchedGoalId(response);
-    if (touchedGoalId) {
-      refreshOneGoal(touchedGoalId).catch(() => {});
-    } else {
-      refreshSidebar().catch(() => {});
-    }
-  } catch (err) {
-    const isAbort = err.name === 'AbortError';
-    resolvePending(pending, 'error',
-      isAbort ? 'That took too long. Try again.' : `Something went wrong: ${err.message}`);
-  } finally {
-    // Re-enable the input immediately. Sidebar refresh runs in parallel.
-    $send.disabled = false;
-    $input.focus();
-  }
-});
-
-/**
- * Send one message to /mcp. If the server says the error is retryable
- * (data.retryable === true), resend the same text once. On the retry,
- * update the bubble text to "retrying...". If the retry also fails,
- * throw the second error so the caller shows the failure message.
- *
- * The returned object is the successful response, with __retried: true
- * set if this was the retry that succeeded.
- */
-async function sendStatementWithRetry(text) {
-  let first;
-  try {
-    first = await mcpCall('report_statement', { text });
-  } catch (e) {
-    throw e;
-  }
-
-  if (first && first.data && first.data.retryable === true) {
-    // Show retrying state on the pending bubble.
-    const bubbles = $messages.querySelectorAll('.row.thinking .bubble');
-    const lastThinking = bubbles[bubbles.length - 1];
-    if (lastThinking) lastThinking.textContent = 'retrying...';
-
-    const second = await mcpCall('report_statement', { text });
-    if (second && typeof second === 'object') {
-      second.__retried = true;
-    }
-    return second;
-  }
-
-  return first;
-}
-
-$input.addEventListener('input', () => {
-  $input.style.height = 'auto';
-  $input.style.height = Math.min($input.scrollHeight, 160) + 'px';
-});
-$input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $composer.requestSubmit(); }
-});
-
-// ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 
@@ -954,7 +1020,7 @@ async function refreshSidebar() {
       $goals.innerHTML = `
         <div class="empty">
           <strong>No goals yet.</strong>
-          Tell Onward what you're working toward and when it's due.
+          Tap the orb and tell Onward what you're working toward.
         </div>`;
       return;
     }
@@ -1160,7 +1226,7 @@ document.querySelectorAll('#demo [data-advance]').forEach((btn) => {
       }
       refreshSidebar().catch(() => {});
     } catch (err) {
-      addMessage('error', `Couldn't advance time: ${err.message}`);
+      showError(`Couldn't advance time: ${err.message}`);
     } finally { setDemoButtonsDisabled(false); }
   });
 });
@@ -1172,7 +1238,7 @@ if ($resetBtn) {
       const result = await resetClock();
       updateClockLabel(result);
       refreshSidebar().catch(() => {});
-    } catch (err) { addMessage('error', `Couldn't reset the clock: ${err.message}`); }
+    } catch (err) { showError(`Couldn't reset the clock: ${err.message}`); }
     finally { setDemoButtonsDisabled(false); }
   });
 }
@@ -1201,8 +1267,426 @@ async function loadInitialClock() {
 
 refreshSidebar();
 loadInitialFlag();
+// ---------------------------------------------------------------------------
+// Voice
+//
+// Speech in:  the browser's SpeechRecognition (Chrome / Edge).
+// Speech out: Groq's Orpheus voice through POST /tts. If that is unavailable,
+//             the browser's own voice takes over for that reply.
+// Tap the orb to start. Onward listens, answers out loud, then listens again.
+// Two quiet turns in a row ends the conversation.
+// ---------------------------------------------------------------------------
+const $orb = document.getElementById('orb');
+const $stateLabel = document.getElementById('state-label');
+const $heard = document.getElementById('heard');
+const $reply = document.getElementById('reply');
+const $supportNote = document.getElementById('support-note');
+
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis || null;
+
+const STATE_LABELS = {
+  idle: 'Tap to talk',
+  listening: 'Listening',
+  thinking: 'One moment',
+  speaking: '',
+};
+
+let state = 'idle';
+let active = false;          // a conversation is running
+let busy = false;            // a request is in flight
+let recog = null;
+let ignoreEnd = false;
+let silences = 0;
+let speakToken = 0;          // bumped to cancel whatever is being spoken
+let endCurrentSound = null;
+let audioEl = null;
+let audioCtx = null;
+let slowTimer = null;
+
+function setState(next) {
+  state = next;
+  document.body.dataset.state = next;
+  $stateLabel.textContent = STATE_LABELS[next] ?? '';
+}
+setState('idle');
+
+function showReply(text, isError = false) {
+  $reply.textContent = text;
+  $reply.classList.toggle('error', isError);
+  $reply.classList.add('show');
+  // Long, multi-paragraph replies (briefings) read better left-aligned;
+  // short one-line replies still look right centered.
+  const isLong = text.length > 90 || text.includes('\n');
+  $reply.classList.toggle('multiline', isLong);
+}
+
+function clearReply() {
+  $reply.classList.remove('show');
+  $reply.classList.remove('multiline');
+}
+
+function showError(text) {
+  showReply(text, true);
+}
+
+// ---------------------------------------------------------------------------
+// Making text sound like speech
+// ---------------------------------------------------------------------------
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+const SHORT_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function toSpeech(message) {
+  let t = String(message ?? '');
+  t = t.replace(/\(id [^)]*\)/gi, '');
+  t = t.replace(/\b(20\d\d)-(\d\d)-(\d\d)\b/g, (m, y, mo, d) => {
+    const i = Number(mo) - 1;
+    return MONTHS[i] ? `${MONTHS[i]} ${ordinal(Number(d))}` : m;
+  });
+  t = t.replace(/\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\.? (\d{1,2})\b/g, (m, mon, d) => {
+    const i = SHORT_MONTHS[mon.toLowerCase()];
+    return i === undefined ? m : `${MONTHS[i]} ${ordinal(Number(d))}`;
+  });
+  t = t.replace(/\s*\/\s*/g, ' or ');
+  t = t.replace(/\s*\(([^)]*)\)/g, ', $1,');
+  t = t.replace(/[—–]/g, ', ');
+  t = t.replace(/[*_#`\[\]]/g, '');
+  t = t.replace(/\n+/g, '. ');
+  t = t.replace(/,\s*,/g, ',').replace(/,\s*([.!?])/g, '$1').replace(/\.\s*\./g, '.');
+  t = t.replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+// Up to two chunks of at most 200 characters, cut at sentence ends.
+function chunkSpeech(text) {
+  const MAX = 200;
+  const sentences = text.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
+  const chunks = [];
+  let cur = '';
+  for (let s of sentences) {
+    s = s.trim();
+    if (!s) continue;
+    while (s.length > MAX) {
+      let cut = s.lastIndexOf(',', MAX);
+      if (cut < 60) cut = s.lastIndexOf(' ', MAX);
+      if (cut < 1) cut = MAX;
+      const head = s.slice(0, cut + 1).trim();
+      if (cur) { chunks.push(cur); cur = ''; }
+      chunks.push(head);
+      s = s.slice(cut + 1).trim();
+    }
+    if ((cur + ' ' + s).trim().length > MAX) {
+      if (cur) chunks.push(cur);
+      cur = s;
+    } else {
+      cur = (cur + ' ' + s).trim();
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.slice(0, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Speaking
+// ---------------------------------------------------------------------------
+
+function ensureAudio() {
+  if (!audioEl) audioEl = new Audio();
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { /* no audio context */ }
+}
+
+function tick() {
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
+    o.connect(g).connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.13);
+  } catch { /* audio not available */ }
+}
+
+async function fetchTts(text) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return blob.size > 0 ? URL.createObjectURL(blob) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function playUrl(url, token) {
+  return new Promise((resolve) => {
+    if (token !== speakToken || !audioEl) { resolve(); return; }
+    const done = () => { endCurrentSound = null; resolve(); };
+    endCurrentSound = done;
+    audioEl.onended = done;
+    audioEl.onerror = done;
+    audioEl.src = url;
+    audioEl.play().catch(done);
+  });
+}
+
+let browserVoice = null;
+function pickBrowserVoice() {
+  if (!synth) return;
+  const voices = synth.getVoices().filter((v) => /^en/i.test(v.lang));
+  const prefer = [/Aria.*Natural|Jenny.*Natural|Online \(Natural\)/i, /Natural/i, /Google US English/i, /Samantha|Aria|Jenny|Zira/i];
+  for (const re of prefer) {
+    const v = voices.find((x) => re.test(x.name));
+    if (v) { browserVoice = v; return; }
+  }
+  browserVoice = voices[0] || null;
+}
+if (synth) { pickBrowserVoice(); synth.onvoiceschanged = pickBrowserVoice; }
+
+function browserSpeak(text, token) {
+  return new Promise((resolve) => {
+    if (!synth || token !== speakToken) { resolve(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-US';
+    u.rate = 1.03;
+    if (browserVoice) u.voice = browserVoice;
+    const done = () => { endCurrentSound = null; resolve(); };
+    endCurrentSound = done;
+    u.onend = done;
+    u.onerror = done;
+    synth.speak(u);
+  });
+}
+
+function stopSpeaking() {
+  speakToken++;
+  try { if (audioEl) { audioEl.pause(); } } catch { /* ignore */ }
+  try { if (synth) synth.cancel(); } catch { /* ignore */ }
+  if (endCurrentSound) endCurrentSound();
+}
+
+async function speak(message) {
+  const text = toSpeech(message);
+  if (!text) return;
+  const token = ++speakToken;
+  const chunks = chunkSpeech(text);
+  setState('speaking');
+  // Ask for every chunk at once, then play them in order.
+  const pending = chunks.map((c) => fetchTts(c));
+  for (let i = 0; i < chunks.length; i++) {
+    if (token !== speakToken) return;
+    const url = await pending[i];
+    if (token !== speakToken) { if (url) URL.revokeObjectURL(url); return; }
+    if (url) {
+      await playUrl(url, token);
+      URL.revokeObjectURL(url);
+    } else {
+      await browserSpeak(chunks[i], token);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Talking to Onward
+// ---------------------------------------------------------------------------
+
+async function sendStatement(text) {
+  const first = await mcpCall('report_statement', { text });
+  if (first && first.data && first.data.retryable === true) {
+    const second = await mcpCall('report_statement', { text });
+    return second;
+  }
+  return first;
+}
+
+function startSlowTimer() {
+  clearTimeout(slowTimer);
+  slowTimer = setTimeout(() => {
+    if (state === 'thinking') $stateLabel.textContent = 'Still working on it';
+  }, 6000);
+}
+
+async function handleUtterance(text) {
+  if (busy) return;
+  busy = true;
+  setState('thinking');
+  startSlowTimer();
+  $heard.textContent = `\u201C${text}\u201D`;
+  clearReply();
+  tick();
+
+  let reply;
+  let failed = false;
+  try {
+    const response = await sendStatement(text);
+    reply = response?.message || "Sorry, I didn't catch that.";
+
+    if (response?.proactive_flag) showFlagBanner(response.proactive_flag);
+
+    const touched = pickTouchedGoalId(response);
+    if (touched) refreshOneGoal(touched).catch(() => {});
+    else refreshSidebar().catch(() => {});
+  } catch (err) {
+    failed = true;
+    reply = err.name === 'AbortError'
+      ? 'That took too long. Try again.'
+      : 'Something went wrong. Try again.';
+  }
+
+  clearTimeout(slowTimer);
+  showReply(reply, failed);
+  await speak(reply);
+  busy = false;
+
+  if (active) listen();
+  else setState('idle');
+}
+
+// An announcement Onward makes on its own, such as a reminder after time travel.
+async function speakAnnouncement(message) {
+  if (busy || state === 'listening') return;
+  ensureAudio();
+  busy = true;
+  showReply(message);
+  $heard.textContent = '';
+  await speak(message);
+  busy = false;
+  if (active) listen();
+  else setState('idle');
+}
+
+// ---------------------------------------------------------------------------
+// Listening
+// ---------------------------------------------------------------------------
+
+function endConversation(note) {
+  active = false;
+  silences = 0;
+  if (note) $supportNote.textContent = note;
+  setState('idle');
+}
+
+function listen() {
+  if (!SpeechRec || busy) return;
+  stopSpeaking();
+  recog = new SpeechRec();
+  recog.lang = 'en-US';
+  recog.interimResults = true;
+  recog.continuous = false;
+  recog.maxAlternatives = 1;
+
+  let finalText = '';
+  let interim = '';
+  let errorCode = null;
+  ignoreEnd = false;
+
+  recog.onstart = () => {
+    setState('listening');
+    $heard.textContent = '';
+  };
+  recog.onresult = (e) => {
+    interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) finalText += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    const shown = (finalText + interim).trim();
+    if (shown) $heard.textContent = `\u201C${shown}\u201D`;
+  };
+  recog.onerror = (e) => { errorCode = e.error; };
+  recog.onend = () => {
+    if (ignoreEnd) return;
+    const text = (finalText || interim).trim();
+
+    if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
+      endConversation('The microphone is blocked. Allow it in the address bar and tap the orb again.');
+      return;
+    }
+    if (errorCode === 'network') {
+      endConversation('Speech recognition needs an internet connection.');
+      return;
+    }
+    if (text) {
+      silences = 0;
+      handleUtterance(text);
+      return;
+    }
+    silences++;
+    if (active && silences < 2) setTimeout(listen, 200);
+    else endConversation();
+  };
+
+  try { recog.start(); } catch { /* already started */ }
+}
+
+function stopListening() {
+  ignoreEnd = true;
+  try { if (recog) recog.abort(); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// The orb
+// ---------------------------------------------------------------------------
+
+$orb.addEventListener('click', () => {
+  if (!SpeechRec) return;
+  ensureAudio();
+  $supportNote.textContent = '';
+
+  if (state === 'idle') {
+    active = true;
+    silences = 0;
+    listen();
+    return;
+  }
+  if (state === 'speaking') {
+    // Tapping while Onward talks cuts it off and listens.
+    stopSpeaking();
+    busy = false;
+    active = true;
+    listen();
+    return;
+  }
+  if (state === 'listening') {
+    stopListening();
+    endConversation();
+    return;
+  }
+  // thinking: nothing to interrupt
+});
+
+if (!SpeechRec) {
+  $supportNote.textContent = 'Voice input works in Chrome or Edge. Open this page there.';
+  $orb.disabled = true;
+  $orb.style.opacity = '0.4';
+}
+
 loadInitialClock();
-$input.focus();
 </script>
 </body>
 </html>
